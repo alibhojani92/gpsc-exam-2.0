@@ -2,13 +2,11 @@ name = "gpsc-v2"
 main = "worker.js"
 compatibility_date = "2026-01-15"
 
-account_id = "9c0ba8338cde064189c6f8e2c9b7ac61"
-
 [[d1_databases]]
 binding = "DB"
 database_name = "gpsc_v2_db"
 database_id = "308c09e8-daa2-40ed-a68b-6a8ae3e158aa"
 
-kv_namespaces = [
-  { binding = "KV", id = "87a246dc84004e09b6b8f0fe62c4cfef" }
-]
+[[kv_namespaces]]
+binding = "KV"
+id = "87a246dc84004e09b6b8f0fe62c4cfef"
