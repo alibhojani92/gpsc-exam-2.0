@@ -993,3 +993,128 @@ async function getTodayStats() {
 /*************************************************
  * ========== PHASE 8 END ==========
  *************************************************/
+  /*************************************************
+ * ========== PHASE 9 START ==========
+ * REPORTS • ANALYTICS • WEAK SUBJECT ENGINE
+ *************************************************/
+
+/* ========= DAILY REPORT ========= */
+onCommand("report", async (ctx) => {
+  const today = getTodayKey();
+  const studyMin = await DB.getStudyMinutes(today);
+  const tests = await DB.getTestsByDate(today);
+
+  let text = "📊 Daily Report\n\n";
+  text += `📅 Date: ${today}\n`;
+  text += `📖 Study Time: ${formatHM(studyMin)}\n\n`;
+
+  if (!tests.length) {
+    text += "📝 Tests: Not attempted\n";
+  } else {
+    let totalQ = 0, totalC = 0;
+    const subjectMap = {};
+
+    tests.forEach(t => {
+      totalQ += t.total;
+      totalC += t.correct;
+      subjectMap[t.subject] = subjectMap[t.subject] || { c:0, t:0 };
+      subjectMap[t.subject].c += t.correct;
+      subjectMap[t.subject].t += t.total;
+    });
+
+    text += `📝 Tests: ${totalC}/${totalQ}\n\n📚 Subject Accuracy:\n`;
+    for (const s in subjectMap) {
+      const acc = Math.round(subjectMap[s].c / subjectMap[s].t * 100);
+      text += `• ${s}: ${acc}%\n`;
+    }
+  }
+
+  text += "\n💡 Advice:\nFocus more on weak subjects tomorrow.";
+
+  await ctx.reply(text);
+});
+
+/* ========= WEEKLY REPORT ========= */
+onCommand("wr", async (ctx) => {
+  const data = await DB.getLast7DaysTests();
+  if (!data.length) {
+    return ctx.reply("📈 Weekly Report\n\nNo test data available.");
+  }
+
+  const map = {};
+  data.forEach(t => {
+    map[t.subject] = map[t.subject] || { c:0, t:0 };
+    map[t.subject].c += t.correct;
+    map[t.subject].t += t.total;
+  });
+
+  let text = "📈 Weekly Report\n\n📚 Subject Performance:\n";
+  for (const s in map) {
+    const acc = Math.round(map[s].c / map[s].t * 100);
+    text += `• ${s}: ${acc}%\n`;
+  }
+
+  text += "\n🔥 Work on subjects below 60% accuracy.";
+
+  await ctx.reply(text);
+});
+
+/* ========= MONTHLY REPORT ========= */
+onCommand("mr", async (ctx) => {
+  const data = await DB.getThisMonthTests();
+  if (!data.length) {
+    return ctx.reply("📊 Monthly Report\n\nNo data available.");
+  }
+
+  let totalQ = 0, totalC = 0;
+  data.forEach(t => {
+    totalQ += t.total;
+    totalC += t.correct;
+  });
+
+  const acc = Math.round(totalC / totalQ * 100);
+
+  await ctx.reply(
+    `📊 Monthly Report\n\n` +
+    `📝 Questions: ${totalQ}\n` +
+    `✅ Correct: ${totalC}\n` +
+    `🎯 Accuracy: ${acc}%\n\n` +
+    `💡 Advice:\nRevise weak subjects weekly.`
+  );
+});
+
+/* ========= WEAK SUBJECT DETECTION ========= */
+async function getWeakSubjects() {
+  const data = await DB.getLast30DaysTests();
+  const map = {};
+
+  data.forEach(t => {
+    map[t.subject] = map[t.subject] || { c:0, t:0 };
+    map[t.subject].c += t.correct;
+    map[t.subject].t += t.total;
+  });
+
+  const weak = [];
+  for (const s in map) {
+    const acc = Math.round(map[s].c / map[s].t * 100);
+    if (acc < 60) weak.push(s);
+  }
+  return weak;
+}
+
+/* ========= AUTO WEAK SUBJECT MESSAGE ========= */
+async function sendWeakSubjectReminder() {
+  const weak = await getWeakSubjects();
+  if (!weak.length) return;
+
+  const text =
+    "⚠️ Weak Subjects Alert\n\n" +
+    weak.map(s => `• ${s}`).join("\n") +
+    "\n\n📘 Revise these today.";
+
+  await sendMessage(GROUP_ID, text);
+}
+
+/*************************************************
+ * ========== PHASE 9 END ==========
+ *************************************************/
