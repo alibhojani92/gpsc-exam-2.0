@@ -115,145 +115,202 @@ export default {
 /**********************************************************
  * PHASE 1 END
  **********************************************************/
-/***********************
- PHASE 2 START
- TEST ENGINE CORE (DT / WT)
-***********************/
+/************************************************************
+ * =================== PHASE-2 START ======================
+ * TEST ENGINE (DT / WT)
+ * NO Phase-1 code here
+ ************************************************************/
 
-// helper: fetch random MCQs (no repeat logic will come later)
-async function getRandomMCQs(env, limit) {
-  const { results } = await env.DB
-    .prepare(`SELECT * FROM mcqs ORDER BY RANDOM() LIMIT ?`)
-    .bind(limit)
-    .all();
-  return results || [];
+/* ========= CONSTANTS ========= */
+const TEST_TIME_MS = 5 * 60 * 1000;          // 5 minutes
+const LAST_WARNING_MS = 2 * 60 * 1000;       // 2 minutes left
+
+/* ========= RUNTIME STATE (in-memory) ========= */
+let ACTIVE_TESTS = {}; 
+// chatId -> { questions, index, correct, wrong, timer, warned }
+
+/* ========= UTIL ========= */
+function isTestRunning(chatId) {
+  return ACTIVE_TESTS[chatId] !== undefined;
 }
 
-// START DAILY TEST
-async function handleDailyTest(chatId, env) {
-  const mcqs = await getRandomMCQs(env, 20);
+/* ========= FETCH MCQS ========= */
+async function fetchMCQs(env, limit, subject = null) {
+  let sql = `SELECT * FROM mcqs`;
+  let params = [];
+
+  if (subject) {
+    sql += ` WHERE LOWER(subject)=?`;
+    params.push(subject.toLowerCase());
+  }
+
+  sql += ` ORDER BY RANDOM() LIMIT ?`;
+  params.push(limit);
+
+  const res = await env.DB.prepare(sql).bind(...params).all();
+  return res.results || [];
+}
+
+/* ========= START TEST ========= */
+async function startTest(chatId, env, type, subject = null) {
+  if (isTestRunning(chatId)) {
+    return sendMessage(chatId,
+      `⚠️ Test already running.\nFinish it before starting a new one.`
+    );
+  }
+
+  const limit = type === "DT" ? 20 : 50;
+  const mcqs = await fetchMCQs(env, limit, subject);
 
   if (!mcqs.length) {
-    await sendMessage(env, chatId,
-      `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
-
-⚠️ *Daily Test unavailable*
-
-📭 MCQs add nahi thayela che.
-🛠️ Admin ne MCQs add karva kaho.
-
-💡 Tip: Pehla MCQs add → pachi test`
+    return sendMessage(chatId,
+      `❌ No MCQs available${subject ? ` for "${subject}"` : ""}.\nAsk admin to add questions.`
     );
-    return;
   }
 
-  await sendMessage(env, chatId,
-    `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+  ACTIVE_TESTS[chatId] = {
+    type,
+    questions: mcqs,
+    index: 0,
+    correct: 0,
+    wrong: 0,
+    warned: false,
+    timer: null
+  };
 
-📝 *Daily Test Started*
-📊 Questions: ${mcqs.length}
-⏱️ Time: 5 min per question
-
-✨ All the best!`
+  await sendMessage(
+    chatId,
+    `📝 ${type === "DT" ? "Daily" : "Weekly"} Test Started\n` +
+    `📚 Questions: ${mcqs.length}\n` +
+    `⏱️ Time per question: 5 minutes`
   );
 
-  // store active test (simplified for Phase-2)
-  await env.KV.put(
-    `active_test_${chatId}`,
-    JSON.stringify({ type: "DT", index: 0, mcqs })
-  );
-
-  await sendQuestion(env, chatId);
+  await askNextQuestion(chatId, env);
 }
 
-// START WEEKLY TEST
-async function handleWeeklyTest(chatId, env) {
-  const mcqs = await getRandomMCQs(env, 50);
+/* ========= ASK QUESTION ========= */
+async function askNextQuestion(chatId, env) {
+  const test = ACTIVE_TESTS[chatId];
+  if (!test) return;
 
-  if (!mcqs.length) {
-    await sendMessage(env, chatId,
-      `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+  if (test.index >= test.questions.length) {
+    return finishTest(chatId);
+  }
 
-⚠️ *Weekly Test unavailable*
+  const q = test.questions[test.index];
 
-📭 MCQs add nahi thayela che.
-🛠️ Admin ne MCQs add karva kaho.`
+  test.warned = false;
+
+  const text =
+    `❓ *Question ${test.index + 1}*\n\n` +
+    `${q.question}\n\n` +
+    `A) ${q.a}\n` +
+    `B) ${q.b}\n` +
+    `C) ${q.c}\n` +
+    `D) ${q.d}`;
+
+  await sendMessage(chatId, text, {
+    inline_keyboard: [
+      [{ text: "A", callback_data: "A" }, { text: "B", callback_data: "B" }],
+      [{ text: "C", callback_data: "C" }, { text: "D", callback_data: "D" }]
+    ]
+  });
+
+  test.timer = setTimeout(async () => {
+    if (!test.warned) {
+      test.warned = true;
+      await sendMessage(chatId, `⏳ *2 minutes left!*`);
+    }
+  }, TEST_TIME_MS - LAST_WARNING_MS);
+
+  test.timeout = setTimeout(async () => {
+    test.wrong++;
+    await sendMessage(
+      chatId,
+      `⏰ Time up!\n` +
+      `✅ Correct: ${q.answer}\n` +
+      `📖 ${q.explanation}`
     );
-    return;
-  }
-
-  await sendMessage(env, chatId,
-    `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
-
-📝 *Weekly Test Started*
-📊 Questions: ${mcqs.length}
-⏱️ Time: 5 min per question
-
-🔥 Stay focused!`
-  );
-
-  await env.KV.put(
-    `active_test_${chatId}`,
-    JSON.stringify({ type: "WT", index: 0, mcqs })
-  );
-
-  await sendQuestion(env, chatId);
+    test.index++;
+    await askNextQuestion(chatId, env);
+  }, TEST_TIME_MS);
 }
 
-// SEND QUESTION
-async function sendQuestion(env, chatId) {
-  const raw = await env.KV.get(`active_test_${chatId}`);
-  if (!raw) return;
+/* ========= HANDLE ANSWER ========= */
+async function handleAnswer(chatId, env, choice) {
+  const test = ACTIVE_TESTS[chatId];
+  if (!test) return;
 
-  const test = JSON.parse(raw);
-  const q = test.mcqs[test.index];
+  clearTimeout(test.timer);
+  clearTimeout(test.timeout);
 
-  if (!q) {
-    await sendMessage(env, chatId,
-      `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+  const q = test.questions[test.index];
 
-✅ *Test Completed*
-🎉 Great effort!
-
-📊 Result & analysis next phase ma add thase.`
+  if (choice === q.answer) {
+    test.correct++;
+    await sendMessage(chatId, `✅ Correct!\n📖 ${q.explanation}`);
+  } else {
+    test.wrong++;
+    await sendMessage(
+      chatId,
+      `❌ Wrong\n` +
+      `✅ Correct: ${q.answer}\n` +
+      `📖 ${q.explanation}`
     );
-    await env.KV.delete(`active_test_${chatId}`);
-    return;
   }
 
-  await sendMessage(env, chatId,
-`🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+  test.index++;
+  await askNextQuestion(chatId, env);
+}
 
-❓ *Q${test.index + 1}*
-${q.question}
+/* ========= FINISH TEST ========= */
+async function finishTest(chatId) {
+  const test = ACTIVE_TESTS[chatId];
+  if (!test) return;
 
-A️⃣ ${q.option_a}
-B️⃣ ${q.option_b}
-C️⃣ ${q.option_c}
-D️⃣ ${q.option_d}
+  const total = test.questions.length;
+  const score = test.correct;
 
-⏳ *5 minutes remaining*`
+  delete ACTIVE_TESTS[chatId];
+
+  await sendMessage(
+    chatId,
+    `📊 *Test Completed*\n\n` +
+    `✅ Correct: ${score}\n` +
+    `❌ Wrong: ${total - score}\n` +
+    `🎯 Accuracy: ${Math.round((score / total) * 100)}%`
   );
 }
 
-// ROUTER HOOK (called from main fetch)
-async function phase2Router(message, env) {
-  const text = message.text?.toLowerCase();
-  const chatId = message.chat.id;
+/* ========= COMMAND ROUTER ========= */
+async function phase2Router(update, env) {
+  const msg = update.message || update.callback_query?.message;
+  if (!msg) return;
 
-  if (text === "/dt") {
-    await handleDailyTest(chatId, env);
-    return true;
+  const chatId = msg.chat.id;
+
+  /* ---- Callback (Answer click) ---- */
+  if (update.callback_query) {
+    const choice = update.callback_query.data;
+    return handleAnswer(chatId, env, choice);
   }
 
-  if (text === "/wt") {
-    await handleWeeklyTest(chatId, env);
-    return true;
+  const text = msg.text?.trim();
+  if (!text) return;
+
+  /* ---- Daily Test ---- */
+  if (text.startsWith("/dt")) {
+    const subject = text.split(" ").slice(1).join(" ") || null;
+    return startTest(chatId, env, "DT", subject);
   }
 
-  return false;
+  /* ---- Weekly Test ---- */
+  if (text.startsWith("/wt")) {
+    const subject = text.split(" ").slice(1).join(" ") || null;
+    return startTest(chatId, env, "WT", subject);
+  }
 }
 
-/***********************
- PHASE 2 END
-***********************/
+/************************************************************
+ * ==================== PHASE-2 END =======================
+ ************************************************************/
