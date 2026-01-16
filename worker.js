@@ -753,3 +753,151 @@ function broadcast(text) {
 }
 
 /* ================== END PHASE-6 ================== */
+/* ============================================================
+ * PHASE-7 : ADVANCED TEST ENGINE (NO REPEAT + SMART SUBJECT)
+ * ============================================================
+ */
+
+let ACTIVE_TEST = null;
+
+/* ---------- Helper: get non-repeated MCQs ---------- */
+async function getFreshMCQs(subject, limit) {
+  const today = new Date().toISOString().slice(0, 10);
+  const usedRaw = await KV.get("used_mcqs") || "[]";
+  const used = JSON.parse(usedRaw);
+
+  let pool = MCQS.filter(q => {
+    if (subject && q.subject.toLowerCase() !== subject.toLowerCase()) return false;
+    const lastUsed = used[q.id];
+    if (!lastUsed) return true;
+    const diff = (new Date(today) - new Date(lastUsed)) / (1000*60*60*24);
+    return diff > 30;
+  });
+
+  return pool.sort(() => Math.random() - 0.5).slice(0, limit);
+}
+
+/* ---------- Start Test ---------- */
+async function startTest(type, subject = null) {
+  const limit = type === "Weekly" ? 50 : 20;
+  const questions = await getFreshMCQs(subject, limit);
+
+  if (!questions.length) {
+    sendMessage(ENV, GROUP_ID, `
+🌺 Dear Student 🌺
+⚠️ No fresh MCQs available.
+Please revise or wait for new questions.
+`);
+    return;
+  }
+
+  ACTIVE_TEST = {
+    type,
+    subject,
+    index: 0,
+    correct: 0,
+    wrong: 0,
+    questions,
+    timer: null,
+    reminder: null
+  };
+
+  TEST_RUNNING = true;
+  askQuestion();
+}
+
+/* ---------- Ask Question ---------- */
+function askQuestion() {
+  const t = ACTIVE_TEST;
+  if (!t || t.index >= t.questions.length) {
+    endTest();
+    return;
+  }
+
+  const q = t.questions[t.index];
+
+  sendMessage(ENV, GROUP_ID, `
+🌺 Dear Student 🌺
+📝 ${t.type} Test – Q${t.index + 1}
+
+${q.question}
+
+A️⃣ ${q.A}
+B️⃣ ${q.B}
+C️⃣ ${q.C}
+D️⃣ ${q.D}
+
+⏱️ Time: 5 minutes
+`, {
+    inline_keyboard: [
+      [{ text: "A️⃣", callback_data: "A" }, { text: "B️⃣", callback_data: "B" }],
+      [{ text: "C️⃣", callback_data: "C" }, { text: "D️⃣", callback_data: "D" }]
+    ]
+  });
+
+  // 2 minute reminder
+  t.reminder = setTimeout(() => {
+    sendMessage(ENV, GROUP_ID, "⏳ Only 2 minutes left!");
+  }, 3 * 60 * 1000);
+
+  // Auto timeout
+  t.timer = setTimeout(() => {
+    t.wrong++;
+    sendAnswer(q, null, true);
+  }, 5 * 60 * 1000);
+}
+
+/* ---------- Handle Answer ---------- */
+async function handleAnswer(ans) {
+  const t = ACTIVE_TEST;
+  if (!t) return;
+
+  clearTimeout(t.timer);
+  clearTimeout(t.reminder);
+
+  const q = t.questions[t.index];
+  const usedRaw = await KV.get("used_mcqs") || "{}";
+  const used = JSON.parse(usedRaw);
+  used[q.id] = new Date().toISOString().slice(0, 10);
+  await KV.put("used_mcqs", JSON.stringify(used));
+
+  if (ans === q.answer) t.correct++;
+  else t.wrong++;
+
+  sendAnswer(q, ans, false);
+}
+
+/* ---------- Send Answer ---------- */
+function sendAnswer(q, ans, timeout) {
+  let text = `
+🌺 Dear Student 🌺
+`;
+
+  if (timeout) {
+    text += `⏰ Time Up!\n`;
+    text += `✔️ Correct: ${q.answer}\n`;
+  } else if (ans === q.answer) {
+    text += `✅ Correct Answer\n`;
+  } else {
+    text += `❌ Wrong Answer\n✔️ Correct: ${q.answer}\n`;
+  }
+
+  text += `
+📚 Subject: ${q.subject}
+💡 Explanation:
+${q.explanation}
+`;
+
+  sendMessage(ENV, GROUP_ID, text);
+
+  ACTIVE_TEST.index++;
+  setTimeout(askQuestion, 2000);
+}
+
+/* ---------- End Test ---------- */
+function endTest() {
+  const t = ACTIVE_TEST;
+  TEST_RUNNING = false;
+  ACTIVE_TEST = null;
+
+  sendMessage(ENV, GROUP_ID
