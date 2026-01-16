@@ -655,3 +655,101 @@ function sendAdminReport(env, chatId) {
 }
 
 /* ================== END PHASE-5 ================== */
+/* ============================================================
+ * PHASE-6 : AUTOMATION + TIMERS (IST)
+ * ============================================================
+ */
+
+function nowIST() {
+  return new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
+  );
+}
+
+let TEST_RUNNING = false;
+
+/* ------------------------------
+   AUTOMATION TICK (Every 1 min)
+--------------------------------*/
+setInterval(() => {
+  if (TEST_RUNNING) return;
+
+  const now = nowIST();
+  const h = now.getHours();
+  const m = now.getMinutes();
+
+  // Morning message
+  if (h === 6 && m === 1) {
+    broadcast(`
+🌺 Dear Student 🌺
+🌅 Good Morning
+
+🎯 Today Target: 08:00 hrs
+📘 Start early, stay ahead 💪
+`);
+  }
+
+  // Daily test reminders
+  if (h === 18 && m === 0) {
+    broadcast(`
+⏰ Reminder
+📝 Daily Test tonight at 11:00 PM
+⏳ 5 hours left
+`);
+  }
+
+  if (h === 21 && m === 30) {
+    broadcast(`
+⏰ Reminder
+📝 Daily Test at 11:00 PM
+⌛ Only 1.5 hours left
+`);
+  }
+
+  // Weekly reminders
+  if (now.getDay() === 5 && h === 21 && m === 0) {
+    broadcast(`
+📢 Weekly Test Alert
+📝 Tomorrow (Saturday) at 5:00 PM
+Prepare well 💪
+`);
+  }
+
+  if (now.getDay() === 6 && h === 21 && m === 0) {
+    broadcast(`
+📢 Weekly Test Reminder
+📝 Tomorrow (Sunday) at 5:00 PM
+Last revision today 📚
+`);
+  }
+
+  // Sunday weekly report
+  if (now.getDay() === 0 && h === 21 && m === 0) {
+    broadcast(`
+📊 Weekly Performance Summary
+📘 Study consistently
+📝 Focus on weak subjects
+`);
+  }
+
+  // Night summary
+  if (h === 23 && m === 59) {
+    broadcast(`
+🌺 Dear Student 🌺
+🌙 Good Night
+
+💡 Tip:
+Small daily effort creates big success 😴
+`);
+  }
+}, 60000);
+
+/* ------------------------------
+   Broadcast Helper
+--------------------------------*/
+function broadcast(text) {
+  sendMessage(ENV, GROUP_ID, text);
+  // private users handled internally
+}
+
+/* ================== END PHASE-6 ================== */
