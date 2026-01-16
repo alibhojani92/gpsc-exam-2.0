@@ -1,36 +1,32 @@
 /*****************************************************************
  * GPSC EXAM 2.0 BOT
- * PHASE 2 – READING TIME ENGINE
- * (Phase-1 + Phase-2 FULL REPLACEMENT)
+ * PHASE 2 – FIXED READING TIME ENGINE (FINAL)
  *****************************************************************/
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     if (request.method !== "POST") {
-      return new Response("Bot running ✅", { status: 200 });
+      return new Response("OK", { status: 200 });
     }
 
     const update = await request.json();
-    if (!update.message) {
-      return new Response("No message", { status: 200 });
-    }
+    if (!update.message) return new Response("OK");
 
-    const message = update.message;
-    const chatId = message.chat.id;
-    const userId = message.from.id;
-    const text = (message.text || "").trim();
+    const msg = update.message;
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const text = (msg.text || "").trim();
 
     const BOT_TOKEN = env.BOT_TOKEN;
     const KV = env.KV;
 
-    /* ---------------- TELEGRAM SEND ---------------- */
-    async function sendMessage(text, replyMarkup = null) {
+    async function send(text, keyboard = null) {
       const payload = {
         chat_id: chatId,
         text,
         parse_mode: "HTML",
       };
-      if (replyMarkup) payload.reply_markup = replyMarkup;
+      if (keyboard) payload.reply_markup = keyboard;
 
       await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: "POST",
@@ -39,51 +35,49 @@ export default {
       });
     }
 
-    /* ---------------- HELPERS ---------------- */
     const TODAY = new Date().toISOString().slice(0, 10);
-    const TARGET_SECONDS = 8 * 60 * 60; // 8 hours
+    const TARGET = 8 * 60 * 60;
 
     async function getState() {
       const raw = await KV.get(`state:${userId}`);
       if (!raw) {
         return {
           date: TODAY,
-          isReading: false,
-          startTime: null,
           totalSeconds: 0,
+          isReading: false,
+          activeStart: null,
         };
       }
       return JSON.parse(raw);
     }
 
-    async function saveState(state) {
+    async function save(state) {
       await KV.put(`state:${userId}`, JSON.stringify(state));
     }
 
-    function formatTime(sec) {
+    function fmt(sec) {
       const h = Math.floor(sec / 3600);
       const m = Math.floor((sec % 3600) / 60);
-      return `${h.toString().padStart(2, "0")}h ${m
-        .toString()
-        .padStart(2, "0")}m`;
+      return `${h}h ${m}m`;
     }
 
-    /* ---------------- DAILY RESET ---------------- */
     let state = await getState();
-    if (state.date !== TODAY) {
+
+    /* DAILY RESET (SAFE) */
+    if (state.date !== TODAY && !state.isReading) {
       state = {
         date: TODAY,
-        isReading: false,
-        startTime: null,
         totalSeconds: 0,
+        isReading: false,
+        activeStart: null,
       };
-      await saveState(state);
+      await save(state);
     }
 
-    /* ---------------- /START ---------------- */
+    /* START */
     if (text === "/start") {
-      await sendMessage(
-        `🌸 <b>Dear Student</b> 🌸\n\n📚 Welcome to <b>GPSC Exam 2.0</b>\n🎯 Daily Target: <b>08:00 hours</b>\n👇 Use buttons below`,
+      await send(
+        `🌸 <b>Dear Student</b> 🌸\n\n📚 GPSC Exam 2.0\n🎯 Daily Target: 08:00 hours`,
         {
           keyboard: [
             ["Start Reading", "Stop Reading"],
@@ -95,76 +89,67 @@ export default {
       return new Response("OK");
     }
 
-    /* ---------------- START READING ---------------- */
-    if (text === "Start Reading" || text === "/startreading") {
+    /* START READING */
+    if (text === "Start Reading") {
       if (state.isReading) {
-        await sendMessage(
-          `⚠️ <b>Already Reading</b>\n\nStop current session first.`
-        );
+        await send("⚠️ Reading already running");
         return new Response("OK");
       }
 
       state.isReading = true;
-      state.startTime = Date.now();
-      await saveState(state);
+      state.activeStart = Date.now();
+      await save(state);
 
-      await sendMessage(
-        `📖 <b>Reading started</b>\n\n🎯 Target: 08:00\n💪 Stay focused`
+      await send(
+        `📖 <b>Reading started</b>\n🎯 Target: 08:00\n💪 Stay focused`
       );
       return new Response("OK");
     }
 
-    /* ---------------- STOP READING ---------------- */
-    if (text === "Stop Reading" || text === "/stopreading") {
-      if (!state.isReading) {
-        await sendMessage(
-          `⚠️ <b>Reading not active</b>\n\nStart reading first.`
-        );
+    /* STOP READING */
+    if (text === "Stop Reading") {
+      if (!state.isReading || !state.activeStart) {
+        await send("⚠️ Reading not active");
         return new Response("OK");
       }
 
       const now = Date.now();
-      const sessionSeconds = Math.floor((now - state.startTime) / 1000);
+      const session = Math.floor((now - state.activeStart) / 1000);
 
-      state.totalSeconds += sessionSeconds;
+      state.totalSeconds += session;
       state.isReading = false;
-      state.startTime = null;
-      await saveState(state);
+      state.activeStart = null;
+      await save(state);
 
-      await sendMessage(
-        `⏹ <b>Reading stopped</b>\n\n😌 Take rest`
-      );
+      await send(`⏹ <b>Reading stopped</b>\n😌 Take rest`);
       return new Response("OK");
     }
 
-    /* ---------------- TODAY STATUS ---------------- */
-    if (text === "Today Status" || text === "/status") {
-      let liveSeconds = state.totalSeconds;
-      if (state.isReading && state.startTime) {
-        liveSeconds += Math.floor((Date.now() - state.startTime) / 1000);
+    /* STATUS */
+    if (text === "Today Status") {
+      let total = state.totalSeconds;
+      if (state.isReading && state.activeStart) {
+        total += Math.floor((Date.now() - state.activeStart) / 1000);
       }
 
-      const remaining = Math.max(TARGET_SECONDS - liveSeconds, 0);
+      const remain = Math.max(TARGET - total, 0);
 
-      await sendMessage(
-        `🌸 <b>Dear Student</b> 🌸\n\n📊 <b>Today's Study</b>\n⏱ Studied: <b>${formatTime(
-          liveSeconds
-        )}</b>\n🎯 Target: <b>08h 00m</b>\n⏳ Remaining: <b>${formatTime(
-          remaining
-        )}</b>`
+      await send(
+        `📊 <b>Today's Study</b>\n\n⏱ Studied: <b>${fmt(
+          total
+        )}</b>\n🎯 Target: 08h\n⏳ Remaining: <b>${fmt(remain)}</b>`
       );
       return new Response("OK");
     }
 
-    /* ---------------- HELP ---------------- */
-    if (text === "Help" || text === "/help") {
-      await sendMessage(
-        `🌸 <b>Dear Student</b> 🌸\n\n📌 Available Commands:\n• Start Reading\n• Stop Reading\n• Today Status\n\n⚠️ MCQ mode inactive`
+    /* HELP */
+    if (text === "Help") {
+      await send(
+        `ℹ️ Commands:\n• Start Reading\n• Stop Reading\n• Today Status`
       );
       return new Response("OK");
     }
 
-    /* ---------------- SAFE MODE (NO SPAM) ---------------- */
     return new Response("OK");
   },
 };
