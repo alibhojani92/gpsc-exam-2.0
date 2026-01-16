@@ -1,264 +1,136 @@
-/* =====================================================
-   GPSC EXAM 2.0 – PHASE 1 (CORE STABLE)
-   Cloudflare Worker
-   ===================================================== */
-
 export default {
-  async fetch(request, env, ctx) {
-    if (request.method !== "POST") {
+  async fetch(req, env, ctx) {
+    if (req.method !== "POST") return new Response("Dental GPSC Bot Running ✅");
+
+    const update = await req.json();
+    if (!update.message && !update.callback_query) return new Response("OK");
+
+    const BOT = `https://api.telegram.org/bot${env.BOT_TOKEN}`;
+    const ADMIN = Number(env.ADMIN_ID);
+    const KV = env.KV;
+
+    /* ---------- TIME ---------- */
+    const IST = () =>
+      new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const today = () => IST().toISOString().slice(0, 10);
+    const hhmm = (m) =>
+      `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(
+        2,
+        "0"
+      )}`;
+
+    /* ---------- SEND ---------- */
+    const send = async (id, text, kb = null) => {
+      await fetch(`${BOT}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: id,
+          text: `🌺 Dr. Arzoo Fatema 🌺\n\n${text}`,
+          reply_markup: kb,
+        }),
+      });
+    };
+
+    /* ---------- MESSAGE ---------- */
+    const msg = update.message;
+    const cb = update.callback_query;
+    const chatId = msg?.chat?.id || cb?.message.chat.id;
+    const userId = msg?.from?.id || cb?.from.id;
+    const text = (msg?.text || "").trim();
+
+    /* ================= READING ================= */
+    if (/^\/read$/i.test(text)) {
+      if (userId === ADMIN)
+        return send(chatId, "Admin test detected. Reading not counted.");
+
+      const key = `read:session:${userId}`;
+      const s = await KV.get(key, "json");
+      if (s && s.date === today())
+        return send(chatId, "📖 Reading already running.");
+
+      await KV.put(key, JSON.stringify({ start: Date.now(), date: today() }));
+      await send(chatId, "📚 Reading started\n🎯 Target: 08:00");
+      await send(ADMIN, `🔔 Reading started by ${userId}`);
       return new Response("OK");
     }
 
-    const update = await request.json();
+    if (/^\/stop$/i.test(text)) {
+      if (userId === ADMIN)
+        return send(chatId, "Admin test detected. Reading not counted.");
 
-    const message =
-      update.message ||
-      update.edited_message ||
-      update.callback_query?.message;
+      const key = `read:session:${userId}`;
+      const s = await KV.get(key, "json");
+      if (!s) return send(chatId, "⚠️ No active reading.");
 
-    if (!message) return new Response("OK");
-     // ✅ PHASE-3 ROUTER (MANDATORY POSITION)
-if (await phase3CommandRouter(env, message)) {
-  return new Response("OK");
-}
+      const mins = Math.floor((Date.now() - s.start) / 60000);
+      const logKey = `read:log:${userId}:${s.date}`;
+      const prev = Number(await KV.get(logKey)) || 0;
+      const total = prev + mins;
 
-    const chatId = message.chat.id;
-    const text = update.message?.text || "";
-    const callback = update.callback_query;
+      await KV.put(logKey, total.toString());
+      await KV.delete(key);
 
-    /* ================= HELPERS ================= */
+      await send(
+        chatId,
+        `⏱️ Reading stopped\n📘 Today: ${hhmm(
+          total
+        )}\n🎯 Remaining: ${hhmm(Math.max(480 - total, 0))}`
+      );
+      await send(ADMIN, `🔔 Reading stopped by ${userId}`);
+      return new Response("OK");
+    }
 
-    const sendMessage = async (payload) => {
-      await fetch(
-        `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+    /* ================= MCQ ADD (ADMIN) ================= */
+    if (/^\/addmcq$/i.test(text) && userId === ADMIN) {
+      await send(
+        chatId,
+        "Reply to this message with MCQs.\nFormat:\nSUBJECT: X\nQ1...\nA)\nB)\nC)\nD)\nAns: A\nExp: ..."
+      );
+      await KV.put("mcq:add:mode", "1");
+      return new Response("OK");
+    }
+
+    if (msg?.reply_to_message && (await KV.get("mcq:add:mode")) === "1") {
+      await KV.delete("mcq:add:mode");
+
+      let subject = "General";
+      const sm = text.match(/SUBJECT:\s*(.*)/i);
+      if (sm) subject = sm[1].trim();
+
+      const blocks = text
+        .replace(/SUBJECT:.*\n?/i, "")
+        .split(/\n(?=Q)/i);
+
+      let added = 0;
+      for (const b of blocks) {
+        const q = b.match(/Q\d*\.?\s*(.*)/i)?.[1];
+        const A = b.match(/A\)\s*(.*)/i)?.[1];
+        const B = b.match(/B\)\s*(.*)/i)?.[1];
+        const C = b.match(/C\)\s*(.*)/i)?.[1];
+        const D = b.match(/D\)\s*(.*)/i)?.[1];
+        const ans = b.match(/Ans:\s*([ABCD])/i)?.[1];
+        const exp = b.match(/Exp:\s*(.*)/i)?.[1] || "";
+
+        if (q && A && B && C && D && ans) {
+          const id = crypto.randomUUID();
+          await KV.put(
+            `mcq:${id}`,
+            JSON.stringify({ q, A, B, C, D, ans, exp, subject })
+          );
+          added++;
         }
-      );
-    };
-
-    const minutesToHHMM = (mins) => {
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    };
-
-    const todayKey = () => {
-      const d = new Date();
-      return d.toISOString().slice(0, 10);
-    };
-
-    /* ================= START ================= */
-
-    if (text === "/start") {
-      await sendMessage({
-        chat_id: chatId,
-        text: "🌺 Dear Student 🌺\n\nWelcome To GPSC Exam Prepration ❤️🌺",
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📖 Start Reading", callback_data: "READ_START" }],
-            [{ text: "⏹ Stop Reading", callback_data: "READ_STOP" }],
-            [{ text: "ℹ️ Help", callback_data: "HELP" }],
-          ],
-        },
-      });
-      return new Response("OK");
-    }
-
-    /* ================= HELP ================= */
-
-    if (text === "/help" || callback?.data === "HELP") {
-      await sendMessage({
-        chat_id: chatId,
-        text:
-          "🌺 Dear Student 🌺\n\n" +
-          "📌 Available Commands:\n" +
-          "/start – Start bot\n" +
-          "/read – Start reading\n" +
-          "/stop – Stop reading\n" +
-          "/help – Show help\n\n" +
-          "Use buttons or commands.",
-      });
-      return new Response("OK");
-    }
-
-    /* ================= READ START ================= */
-
-    if (text === "/read" || callback?.data === "READ_START") {
-      const active = await env.KV.get(`READING:${chatId}`);
-
-      if (active) {
-        await sendMessage({
-          chat_id: chatId,
-          text: "⚠️ Reading already started.",
-        });
-        return new Response("OK");
       }
 
-      await env.KV.put(
-        `READING:${chatId}`,
-        JSON.stringify({ start: Date.now() })
-      );
-
-      await sendMessage({
-        chat_id: chatId,
-        text:
-          "📖 Reading started\n\n" +
-          "🎯 Daily Target: 08:00\n" +
-          "Stay focused 💪",
-      });
+      await send(chatId, `✅ MCQs added: ${added}`);
       return new Response("OK");
     }
 
-    /* ================= READ STOP ================= */
-
-    if (text === "/stop" || callback?.data === "READ_STOP") {
-      const active = await env.KV.get(`READING:${chatId}`, { type: "json" });
-
-      if (!active) {
-        await sendMessage({
-          chat_id: chatId,
-          text: "⚠️ Reading not started yet.",
-        });
-        return new Response("OK");
-      }
-
-      const minutes = Math.floor((Date.now() - active.start) / 60000);
-
-      const key = `DAILY:${chatId}:${todayKey()}`;
-      const previous = Number(await env.KV.get(key)) || 0;
-      const total = previous + minutes;
-
-      await env.KV.put(key, String(total));
-      await env.KV.delete(`READING:${chatId}`);
-
-      const remaining = Math.max(480 - total, 0);
-
-      await sendMessage({
-        chat_id: chatId,
-        text:
-          "⏹ Reading stopped\n\n" +
-          `📘 Studied Today: ${minutesToHHMM(total)}\n` +
-          `🎯 Remaining: ${minutesToHHMM(remaining)}`,
-      });
-      return new Response("OK");
+    /* ================= FALLBACK ================= */
+    if (text.startsWith("/")) {
+      await send(chatId, "❓ Command not recognized.");
     }
 
-    /* ================= SILENT MODE ================= */
-    // ❌ NO random text reply
     return new Response("OK");
   },
 };
-// ===== PHASE 1 END =====
-/*********************** PHASE 2 START *************************
- DAILY RESET + YESTERDAY SUMMARY + TARGET RESET (IST)
-***************************************************************/
-
-// ---- TIME HELPERS ----
-function getISTDate() {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-}
-function getDateKey(d = getISTDate()) {
-  return d.toISOString().slice(0, 10);
-}
-function formatHM(minutes) {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-// ---- DAILY CRON (every minute, safe) ----
-async function handleDailyAutomation(env) {
-  const now = getISTDate();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-
-  // Run ONLY at 12:00 AM IST
-  if (hour !== 0 || minute !== 0) return;
-
-  const today = getDateKey(now);
-  const yesterday = getDateKey(new Date(now.getTime() - 86400000));
-
-  // ---- Load KV data ----
-  const readLog = JSON.parse(await env.GPSC_KV.get("READ_LOG") || "{}");
-  const target = 480; // 08:00 hrs in minutes
-
-  const yesterdayMin = readLog[yesterday] || 0;
-
-  // ---- Send Yesterday Summary (GROUP ONLY) ----
-  const summary =
-`🌺 Dear Student 🌺
-
-📊 *Yesterday’s Study Summary*
-📅 Date: ${yesterday}
-
-📘 Studied: ${formatHM(yesterdayMin)}
-🎯 Target: 08:00
-📉 Shortfall: ${formatHM(Math.max(target - yesterdayMin, 0))}
-
-💡 Tip:
-Consistency beats intensity. Keep going 💪`;
-
-  await sendTelegramMessage(env, env.GROUP_ID, summary);
-
-  // ---- Reset today's counters ----
-  readLog[today] = 0;
-  await env.GPSC_KV.put("READ_LOG", JSON.stringify(readLog));
-
-  // Clear active reading sessions
-  await env.GPSC_KV.delete("ACTIVE_READ");
-
-  // Save last reset marker (debug safe)
-  await env.GPSC_KV.put("LAST_RESET", today);
-}
-
-// ---- Hook automation into fetch ----
-async function phase2AutomationHook(env) {
-  await handleDailyAutomation(env);
-}
-
-/*********************** PHASE 2 END ***************************/
-/*********************** PHASE 3 START *************************
- DAILY REPORT COMMAND + ANALYTICS
-***************************************************************/
-
-// ---- DAILY REPORT HANDLER ----
-async function handleDailyReport(env, chatId) {
-  const today = getDateKey(getISTDate());
-  const target = 480; // 08:00 hours
-
-  const readLog = JSON.parse(await env.GPSC_KV.get("READ_LOG") || "{}");
-  const studied = readLog[today] || 0;
-  const remaining = Math.max(target - studied, 0);
-
-  const msg =
-`🌺 Dear Student 🌺
-
-📊 *Daily Study Report*
-📅 Date: ${today}
-
-📘 Studied: ${formatHM(studied)}
-🎯 Target: 08:00
-⏳ Remaining: ${formatHM(remaining)}
-
-💡 Advice:
-Small daily effort = big exam success 💪`;
-
-  await sendTelegramMessage(env, chatId, msg);
-}
-
-// ---- COMMAND ROUTER EXTENSION ----
-async function phase3CommandRouter(env, message) {
-  const text = (message.text || "").trim().toLowerCase();
-  const chatId = message.chat.id;
-
-  if (text === "/report") {
-    await handleDailyReport(env, chatId);
-    return true;
-  }
-  return false;
-}
-
-/*********************** PHASE 3 END ***************************/
