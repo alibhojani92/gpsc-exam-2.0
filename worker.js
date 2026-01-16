@@ -17,6 +17,10 @@ export default {
       update.callback_query?.message;
 
     if (!message) return new Response("OK");
+     // ✅ PHASE-3 ROUTER (MANDATORY POSITION)
+if (await phase3CommandRouter(env, message)) {
+  return new Response("OK");
+}
 
     const chatId = message.chat.id;
     const text = update.message?.text || "";
