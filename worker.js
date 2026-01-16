@@ -901,3 +901,95 @@ function endTest() {
   ACTIVE_TEST = null;
 
   sendMessage(ENV, GROUP_ID
+              /*************************************************
+ * ========== PHASE 8 START ==========
+ * AUTOMATION • CRON • REMINDERS (IST)
+ *************************************************/
+
+// Cloudflare Worker scheduled event
+export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runAutomation(env));
+  }
+};
+
+async function runAutomation(env) {
+  const now = nowIST();
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const day = now.getDay(); // 0 = Sunday
+
+  // 🚫 During active test → NO reminders
+  if (await isTestRunning()) return;
+
+  /* ========= DAILY MIDNIGHT RESET ========= */
+  if (h === 0 && m === 0) {
+    await resetDailyTargets();
+    await sendBoth(
+      "🌺 Dear Student 🌺\n\n🌅 New day started!\n🎯 Daily study target reset to 08:00 hours.\n💪 Let’s begin strong!"
+    );
+  }
+
+  /* ========= DAILY TEST REMINDERS ========= */
+  // 6:00 PM
+  if (h === 18 && m === 0) {
+    await sendBoth(
+      "⏰ Daily Test Reminder\n\n📝 Today’s test at 11:00 PM\n📖 Revise weak subjects now!"
+    );
+  }
+
+  // 9:30 PM
+  if (h === 21 && m === 30) {
+    await sendBoth(
+      "⏳ Final Reminder\n\n📝 Daily Test at 11:00 PM\n⚠️ 1.5 hours left!"
+    );
+  }
+
+  /* ========= GOOD NIGHT + DAILY STATS ========= */
+  if (h === 23 && m === 59) {
+    const stats = await getTodayStats();
+    await sendBoth(
+      `🌙 Good Night 🌙\n\n📊 Today’s Summary:\n📚 Study: ${stats.study}\n📝 Tests: ${stats.tests}\n\n💡 Tip: Consistency beats intensity.\n😴 Rest well!`
+    );
+  }
+
+  /* ========= WEEKLY TEST REMINDERS ========= */
+  // Friday & Saturday 9 PM
+  if ((day === 5 || day === 6) && h === 21 && m === 0) {
+    await sendBoth(
+      "📢 Weekly Test Alert\n\n🧪 Weekly Test tomorrow at 5:00 PM\n📘 Revise all weak subjects!"
+    );
+  }
+
+  /* ========= WEEKLY REPORT ========= */
+  // Sunday 9 PM
+  if (day === 0 && h === 21 && m === 0) {
+    const report = await getWeeklyReport();
+    await sendBoth(
+      `📈 Weekly Performance Report\n\n${report}\n\n🔥 Focus more on weak areas next week!`
+    );
+  }
+}
+
+/* ========= HELPERS ========= */
+
+async function sendBoth(text) {
+  await sendMessage(GROUP_ID, text);
+  await sendMessage(ADMIN_ID, text);
+}
+
+async function resetDailyTargets() {
+  // reset reading session / daily counters
+  await DB.resetDaily(); // already defined in earlier phase
+}
+
+async function getTodayStats() {
+  return {
+    study: await DB.getTodayStudyTime(), // hh:mm
+    tests: await DB.getTodayTestCount()
+  };
+}
+
+/*************************************************
+ * ========== PHASE 8 END ==========
+ *************************************************/
