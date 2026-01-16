@@ -1,35 +1,27 @@
-/**********************************************************************
- * GPSC DENTAL EXAM BOT 2.0
- * PHASE 1 – CORE FOUNDATION (LOCKED)
- * - Webhook routing
- * - Command + Inline handling
- * - Reading start/stop (STATE ONLY)
- * - Safe mode
- **********************************************************************/
+/*****************************************************************
+ * GPSC EXAM 2.0 BOT
+ * PHASE 2 – READING TIME ENGINE
+ * (Phase-1 + Phase-2 FULL REPLACEMENT)
+ *****************************************************************/
 
 export default {
   async fetch(request, env, ctx) {
-
-    /* ---------------- BASIC CHECK ---------------- */
     if (request.method !== "POST") {
-      return new Response("Bot is running ✅", { status: 200 });
+      return new Response("Bot running ✅", { status: 200 });
     }
 
     const update = await request.json();
-    if (!update.message && !update.callback_query) {
+    if (!update.message) {
       return new Response("No message", { status: 200 });
     }
 
-    /* ---------------- MESSAGE NORMALIZATION ---------------- */
-    const message = update.message || update.callback_query.message;
+    const message = update.message;
     const chatId = message.chat.id;
     const userId = message.from.id;
-    const text =
-      update.message?.text ||
-      update.callback_query?.data ||
-      "";
+    const text = (message.text || "").trim();
 
     const BOT_TOKEN = env.BOT_TOKEN;
+    const KV = env.KV;
 
     /* ---------------- TELEGRAM SEND ---------------- */
     async function sendMessage(text, replyMarkup = null) {
@@ -47,23 +39,119 @@ export default {
       });
     }
 
-    /* ======================================================
-       PHASE-1 READING HANDLER (FIXED POSITION)
-    ====================================================== */
-    if (await handleReading(text, userId, env, sendMessage)) {
-      return new Response("OK");
+    /* ---------------- HELPERS ---------------- */
+    const TODAY = new Date().toISOString().slice(0, 10);
+    const TARGET_SECONDS = 8 * 60 * 60; // 8 hours
+
+    async function getState() {
+      const raw = await KV.get(`state:${userId}`);
+      if (!raw) {
+        return {
+          date: TODAY,
+          isReading: false,
+          startTime: null,
+          totalSeconds: 0,
+        };
+      }
+      return JSON.parse(raw);
+    }
+
+    async function saveState(state) {
+      await KV.put(`state:${userId}`, JSON.stringify(state));
+    }
+
+    function formatTime(sec) {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return `${h.toString().padStart(2, "0")}h ${m
+        .toString()
+        .padStart(2, "0")}m`;
+    }
+
+    /* ---------------- DAILY RESET ---------------- */
+    let state = await getState();
+    if (state.date !== TODAY) {
+      state = {
+        date: TODAY,
+        isReading: false,
+        startTime: null,
+        totalSeconds: 0,
+      };
+      await saveState(state);
     }
 
     /* ---------------- /START ---------------- */
     if (text === "/start") {
       await sendMessage(
-`🌺 <b>Dear Student</b> 🌺
+        `🌸 <b>Dear Student</b> 🌸\n\n📚 Welcome to <b>GPSC Exam 2.0</b>\n🎯 Daily Target: <b>08:00 hours</b>\n👇 Use buttons below`,
+        {
+          keyboard: [
+            ["Start Reading", "Stop Reading"],
+            ["Today Status", "Help"],
+          ],
+          resize_keyboard: true,
+        }
+      );
+      return new Response("OK");
+    }
 
-📚 Welcome to <b>GPSC Exam 2.0</b>
+    /* ---------------- START READING ---------------- */
+    if (text === "Start Reading" || text === "/startreading") {
+      if (state.isReading) {
+        await sendMessage(
+          `⚠️ <b>Already Reading</b>\n\nStop current session first.`
+        );
+        return new Response("OK");
+      }
 
-🎯 Daily Target: <b>08:00 hours</b>
-👇 Use buttons below`,
-        mainKeyboard()
+      state.isReading = true;
+      state.startTime = Date.now();
+      await saveState(state);
+
+      await sendMessage(
+        `📖 <b>Reading started</b>\n\n🎯 Target: 08:00\n💪 Stay focused`
+      );
+      return new Response("OK");
+    }
+
+    /* ---------------- STOP READING ---------------- */
+    if (text === "Stop Reading" || text === "/stopreading") {
+      if (!state.isReading) {
+        await sendMessage(
+          `⚠️ <b>Reading not active</b>\n\nStart reading first.`
+        );
+        return new Response("OK");
+      }
+
+      const now = Date.now();
+      const sessionSeconds = Math.floor((now - state.startTime) / 1000);
+
+      state.totalSeconds += sessionSeconds;
+      state.isReading = false;
+      state.startTime = null;
+      await saveState(state);
+
+      await sendMessage(
+        `⏹ <b>Reading stopped</b>\n\n😌 Take rest`
+      );
+      return new Response("OK");
+    }
+
+    /* ---------------- TODAY STATUS ---------------- */
+    if (text === "Today Status" || text === "/status") {
+      let liveSeconds = state.totalSeconds;
+      if (state.isReading && state.startTime) {
+        liveSeconds += Math.floor((Date.now() - state.startTime) / 1000);
+      }
+
+      const remaining = Math.max(TARGET_SECONDS - liveSeconds, 0);
+
+      await sendMessage(
+        `🌸 <b>Dear Student</b> 🌸\n\n📊 <b>Today's Study</b>\n⏱ Studied: <b>${formatTime(
+          liveSeconds
+        )}</b>\n🎯 Target: <b>08h 00m</b>\n⏳ Remaining: <b>${formatTime(
+          remaining
+        )}</b>`
       );
       return new Response("OK");
     }
@@ -71,89 +159,12 @@ export default {
     /* ---------------- HELP ---------------- */
     if (text === "Help" || text === "/help") {
       await sendMessage(
-`🌺 <b>Dear Student</b> 🌺
-
-📌 <b>Available Commands</b>
-
-▶ Start Reading
-⏹ Stop Reading
-📊 Today Status
-❓ Help
-
-⚠ MCQ safe mode active
-(No questions added yet)`
+        `🌸 <b>Dear Student</b> 🌸\n\n📌 Available Commands:\n• Start Reading\n• Stop Reading\n• Today Status\n\n⚠️ MCQ mode inactive`
       );
       return new Response("OK");
     }
 
-    /* ---------------- FALLBACK (NO SPAM) ---------------- */
+    /* ---------------- SAFE MODE (NO SPAM) ---------------- */
     return new Response("OK");
   },
 };
-
-/* ======================================================
-   READING HANDLER (PHASE-1)
-   - STATE ONLY
-   - NO TIME CALCULATION YET
-====================================================== */
-async function handleReading(text, userId, env, sendMessage) {
-  const key = `reading:${userId}`;
-
-  /* ---------- START READING ---------- */
-  if (text === "Start Reading" || text === "/startreading") {
-    const existing = await env.KV.get(key);
-    if (existing) {
-      await sendMessage("⚠ Reading already started.");
-      return true;
-    }
-
-    await env.KV.put(
-      key,
-      JSON.stringify({ startedAt: Date.now() })
-    );
-
-    await sendMessage(
-`📖 <b>Reading started</b>
-
-🎯 Target: <b>08:00</b>
-💪 Stay focused`
-    );
-    return true;
-  }
-
-  /* ---------- STOP READING ---------- */
-  if (text === "Stop Reading" || text === "/stopreading") {
-    const existing = await env.KV.get(key);
-    if (!existing) {
-      await sendMessage("⚠ Reading not active.");
-      return true;
-    }
-
-    await env.KV.delete(key);
-
-    await sendMessage(
-`⏹ <b>Reading stopped</b>
-
-😌 Take rest`
-    );
-    return true;
-  }
-
-  return false;
-}
-
-/* ======================================================
-   MAIN KEYBOARD
-====================================================== */
-function mainKeyboard() {
-  return {
-    keyboard: [
-      [{ text: "Start Reading" }, { text: "Stop Reading" }],
-      [{ text: "Today Status" }, { text: "Help" }],
-    ],
-    resize_keyboard: true,
-    one_time_keyboard: false,
-  };
-}
-
-/* ================== END PHASE-1 ================== */
