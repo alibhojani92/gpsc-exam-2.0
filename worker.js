@@ -1,16 +1,14 @@
-if (update.message?.text === "/kvtest") {
-  await env.KV.put("kv_test_key", "KV_OK");
-  const value = await env.KV.get("kv_test_key");
+export default {
+  async fetch(request, env) {
+    // write test
+    await env.KV.put("kv_test_key", "KV_WORKING");
 
-  return fetch(
-    `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: update.message.chat.id,
-        text: `KV TEST RESULT ✅\nValue: ${value}`,
-      }),
-    }
-  );
-}
+    // read test
+    const value = await env.KV.get("kv_test_key");
+
+    return new Response(
+      value ? `KV OK: ${value}` : "KV NOT WORKING",
+      { status: 200 }
+    );
+  }
+};
