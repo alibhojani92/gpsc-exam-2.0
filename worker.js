@@ -1,96 +1,76 @@
-/*************************************************
- * PART 1 – CORE & SAFETY LAYER
- * Project: GPSC Exam 2.0
- * Status: PHASE-1
- *************************************************/
+/**
+ * =========================================
+ * GPSC EXAM 2.0 BOT
+ * PHASE 0.1 – CORE SKELETON
+ * =========================================
+ * - Webhook handler
+ * - Group + Private reply
+ * - Health check
+ * - Intro message
+ * =========================================
+ */
 
-/* ========== BASIC CONSTANTS ========== */
+export default {
+  async fetch(request, env, ctx) {
+    // Health check (browser / ping)
+    if (request.method === "GET") {
+      return new Response("GPSC Exam 2.0 Bot – Phase 0.1 ✅", {
+        status: 200,
+      });
+    }
 
-const BOT_NAME = "🌺 Dear Student 🌺";
-const ADMIN_ID = 7539477188;
-const GROUP_ID = -5154292869;
+    // Only POST allowed for Telegram webhook
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
 
-/* Emojis – global use */
-const EMOJI = {
-  ok: "✅",
-  error: "⚠️",
-  read: "📖",
-  stop: "⏹️",
-  test: "📝",
-  report: "📊",
-  fire: "🔥",
-  clock: "⏱️",
-  brain: "🧠",
-  book: "📚",
-  bell: "🔔",
-  moon: "🌙",
-  sun: "🌅",
+    let update;
+    try {
+      update = await request.json();
+    } catch (e) {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+
+    // Extract message (private or group)
+    const message =
+      update.message ||
+      update.edited_message ||
+      update.callback_query?.message;
+
+    if (!message || !message.chat) {
+      return new Response("No message", { status: 200 });
+    }
+
+    const chatId = message.chat.id;
+    const text = message.text || "";
+
+    // Basic reply (same for group & private)
+    const replyText =
+      "🌺 Dear Student 🌺\n\n" +
+      "✅ Bot is alive and working.\n" +
+      "📌 Phase 0.1 core system active.";
+
+    // Send message back to Telegram
+    await sendMessage(env.BOT_TOKEN, chatId, replyText);
+
+    return new Response("OK", { status: 200 });
+  },
 };
 
-/* ========== SAFE JSON PARSER ========== */
-function safeJSON(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
+/**
+ * Send message helper
+ */
+async function sendMessage(token, chatId, text) {
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
 
-/* ========== MESSAGE TYPE HELPERS ========== */
-function isPrivate(chat) {
-  return chat?.type === "private";
-}
-function isGroup(chat) {
-  return chat?.type === "group" || chat?.type === "supergroup";
-}
-function isAdmin(userId) {
-  return userId === ADMIN_ID;
-}
-
-/* ========== TELEGRAM API HELPERS ========== */
-async function tgSend(env, chatId, text, extra = {}) {
   const payload = {
     chat_id: chatId,
     text,
-    parse_mode: "HTML",
-    ...extra,
   };
 
-  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+  await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 }
-
-/* ========== INTRO MESSAGE ========== */
-async function sendWelcome(env, chatId) {
-  await tgSend(
-    env,
-    chatId,
-    `${BOT_NAME}\n\n${EMOJI.ok} Bot is online & ready`
-  );
-}
-
-/* ========== COMMAND NORMALIZER ========== */
-function normalize(text = "") {
-  return text.trim().toLowerCase();
-}
-
-/* ========== SAFE EMPTY RESPONSE ========== */
-async function safeReply(env, chatId) {
-  await tgSend(
-    env,
-    chatId,
-    `${BOT_NAME}\n${EMOJI.error} Command not available yet`
-  );
-}
-
-/* ========== PART-1 TEST MARKER ========== */
-/*
-TEST CHECKS FOR PART-1:
-1️⃣ Bot replies /start in private
-2️⃣ Bot replies /start in group
-3️⃣ No crash on random message
-4️⃣ Emoji + intro visible
-*/
