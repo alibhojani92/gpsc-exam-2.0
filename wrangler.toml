@@ -7,6 +7,6 @@ binding = "DB"
 database_name = "gpsc_v2_db"
 database_id = "308c09e8-daa2-40ed-a68b-6a8ae3e158aa"
 
-kv_namespaces = [
-  { binding = "KV", id = "87a246dc84040e09b6bf0fe62c4fcef" }
-]
+[[kv_namespaces]]
+binding = "KV"
+id = "87a24dcc84040e09b6b8f0e62c4fcef"
