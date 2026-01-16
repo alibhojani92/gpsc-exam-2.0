@@ -216,3 +216,45 @@ async function phase2AutomationHook(env) {
 }
 
 /*********************** PHASE 2 END ***************************/
+/*********************** PHASE 3 START *************************
+ DAILY REPORT COMMAND + ANALYTICS
+***************************************************************/
+
+// ---- DAILY REPORT HANDLER ----
+async function handleDailyReport(env, chatId) {
+  const today = getDateKey(getISTDate());
+  const target = 480; // 08:00 hours
+
+  const readLog = JSON.parse(await env.GPSC_KV.get("READ_LOG") || "{}");
+  const studied = readLog[today] || 0;
+  const remaining = Math.max(target - studied, 0);
+
+  const msg =
+`🌺 Dear Student 🌺
+
+📊 *Daily Study Report*
+📅 Date: ${today}
+
+📘 Studied: ${formatHM(studied)}
+🎯 Target: 08:00
+⏳ Remaining: ${formatHM(remaining)}
+
+💡 Advice:
+Small daily effort = big exam success 💪`;
+
+  await sendTelegramMessage(env, chatId, msg);
+}
+
+// ---- COMMAND ROUTER EXTENSION ----
+async function phase3CommandRouter(env, message) {
+  const text = (message.text || "").trim().toLowerCase();
+  const chatId = message.chat.id;
+
+  if (text === "/report") {
+    await handleDailyReport(env, chatId);
+    return true;
+  }
+  return false;
+}
+
+/*********************** PHASE 3 END ***************************/
