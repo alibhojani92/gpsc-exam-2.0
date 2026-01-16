@@ -1,6 +1,5 @@
 export default {
   async fetch(request, env, ctx) {
-    // Telegram sends POST requests
     if (request.method !== "POST") {
       return new Response("OK", { status: 200 });
     }
@@ -9,99 +8,63 @@ export default {
     try {
       update = await request.json();
     } catch (e) {
-      console.log("❌ Invalid JSON", e);
-      return new Response("Bad Request", { status: 400 });
+      return new Response("Invalid JSON", { status: 200 });
     }
 
-    // Basic safety
-    if (!update.message && !update.callback_query) {
-      return new Response("Ignored", { status: 200 });
+    const BOT_TOKEN = env.BOT_TOKEN;
+    const API_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
+
+    // FIXED NAME (HARD CODED – NEVER CHANGE)
+    const BOT_NAME = "🌺❤️ My Love Dr Arzoo Fatema ❤️🌺";
+
+    // Get message (private or group)
+    const message =
+      update.message ||
+      update.edited_message ||
+      update.channel_post ||
+      update.edited_channel_post;
+
+    if (!message || !message.chat) {
+      return new Response("No message", { status: 200 });
     }
 
-    const msg = update.message || update.callback_query?.message;
-    if (!msg || !msg.chat) {
-      return new Response("No chat", { status: 200 });
+    const chatId = message.chat.id;
+    const text = (message.text || "").trim();
+
+    let replyText = "";
+
+    // START COMMAND
+    if (text === "/start") {
+      replyText =
+        `${BOT_NAME}\n\n` +
+        `👋 Welcome!\n` +
+        `📚 This is GPSC Exam 2.0 Bot\n\n` +
+        `Type anything to check bot is alive ✅`;
+    }
+    // ANY OTHER MESSAGE
+    else if (text.length > 0) {
+      replyText =
+        `${BOT_NAME}\n\n` +
+        `✅ Bot is working\n` +
+        `📝 You said: ${text}`;
+    } else {
+      return new Response("No text", { status: 200 });
     }
 
-    const chatId = msg.chat.id;
-    const text = msg.text || "";
-
-    // --- COMMAND HANDLER ---
-    if (text.startsWith("/start")) {
-      await sendMessage(env, chatId,
-        "👋 Welcome to *GPSC Exam 2.0* 📚\n\n" +
-        "✅ Bot is live\n" +
-        "✅ Group & Private enabled\n\n" +
-        "More features coming soon 🚀",
-        "Markdown"
-      );
-    }
-
-    // --- HEALTH CHECK ---
-    else if (text === "/ping") {
-      await sendMessage(env, chatId, "🏓 Pong! Bot is alive ✅");
-    }
-
-    // --- DB TEST ---
-    else if (text === "/dbtest") {
-      try {
-        const res = await env.DB.prepare(
-          "SELECT 1 as ok"
-        ).first();
-        await sendMessage(env, chatId, "🗄️ D1 DB Connected ✅");
-      } catch (e) {
-        console.log("DB error", e);
-        await sendMessage(env, chatId, "❌ D1 DB Error");
-      }
-    }
-
-    // --- KV TEST ---
-    else if (text === "/kvtest") {
-      try {
-        await env.KV.put("phase1_test", "ok");
-        const v = await env.KV.get("phase1_test");
-        await sendMessage(env, chatId, "🧠 KV Working ✅");
-      } catch (e) {
-        console.log("KV error", e);
-        await sendMessage(env, chatId, "❌ KV Error");
-      }
-    }
-
-    // --- DEFAULT REPLY (TEMP) ---
-    else {
-      await sendMessage(
-        env,
-        chatId,
-        "ℹ️ Command received.\nPhase-1 active ✅"
-      );
+    // SEND MESSAGE
+    try {
+      await fetch(`${API_URL}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: replyText,
+        }),
+      });
+    } catch (e) {
+      return new Response("Send failed", { status: 200 });
     }
 
     return new Response("OK", { status: 200 });
-  }
+  },
 };
-
-// ==================
-// TELEGRAM SEND API
-// ==================
-async function sendMessage(env, chatId, text, parseMode) {
-  const url = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`;
-
-  const payload = {
-    chat_id: chatId,
-    text: text,
-  };
-
-  if (parseMode) {
-    payload.parse_mode = parseMode;
-  }
-
-  try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    console.log("Send message error", e);
-  }
-}
