@@ -521,3 +521,137 @@ function parseAndStoreMCQs(env, chatId, text) {
 }
 
 /* ================== END PHASE-4 ================== */
+/* ============================================================
+ * PHASE-5 : REPORTS + ANALYTICS
+ * ============================================================
+ */
+
+// store test history
+const TEST_HISTORY = []; 
+// format: { userId, date, score, total, subjectStats }
+
+/* ------------------------------
+   Hook into test end (extend)
+--------------------------------*/
+function saveTestResult(userId, score, total, subjectStats) {
+  TEST_HISTORY.push({
+    userId,
+    date: todayKey(),
+    score,
+    total,
+    subjectStats
+  });
+}
+
+/* ------------------------------
+   REPORT COMMANDS
+--------------------------------*/
+const _phase5HandleMessage = handleMessage;
+handleMessage = async function (message, env) {
+  const chatId = message.chat.id;
+  const userId = message.from.id;
+  const text = message.text || "";
+
+  if (text === "/report" || text === "/daily") {
+    return sendDailyReport(env, chatId, userId);
+  }
+
+  if (text === "/weekly") {
+    return sendWeeklyReport(env, chatId, userId);
+  }
+
+  if (text === "/monthly") {
+    return sendMonthlyReport(env, chatId, userId);
+  }
+
+  if (text === "/adminreport" && userId === ADMIN_ID) {
+    return sendAdminReport(env, chatId);
+  }
+
+  return _phase5HandleMessage(message, env);
+};
+
+/* ------------------------------
+   DAILY REPORT
+--------------------------------*/
+function sendDailyReport(env, chatId, userId) {
+  const today = todayKey();
+  const minutes = STUDY_LOG[userId]?.[today] || 0;
+  const tests = TEST_HISTORY.filter(
+    t => t.userId === userId && t.date === today
+  );
+
+  let msg = `🌺 Dear Student 🌺\n\n📅 Date: ${today}\n\n`;
+  msg += `📘 Reading:\n• Studied: ${formatTime(minutes)}\n• Target: 08:00 hrs\n• Remaining: ${formatTime(Math.max(480 - minutes, 0))}\n\n`;
+
+  if (tests.length === 0) {
+    msg += "📝 Test:\n• Not attempted\n";
+  } else {
+    const t = tests[tests.length - 1];
+    msg += `📝 Test:\n• Score: ${t.score}/${t.total}\n• Accuracy: ${Math.round(
+      (t.score / t.total) * 100
+    )}%\n\n`;
+
+    const weak = Object.entries(t.subjectStats || {})
+      .filter(([_, v]) => v.correct < v.total)
+      .map(([k]) => k);
+
+    if (weak.length)
+      msg += `⚠️ Weak Subjects:\n• ${weak.join("\n• ")}`;
+  }
+
+  return sendMessage(env, chatId, msg);
+}
+
+/* ------------------------------
+   WEEKLY REPORT
+--------------------------------*/
+function sendWeeklyReport(env, chatId, userId) {
+  let totalMin = 0;
+  let testCount = 0;
+
+  Object.entries(STUDY_LOG[userId] || {}).slice(-7).forEach(([_, m]) => {
+    totalMin += m;
+  });
+
+  TEST_HISTORY.forEach(t => {
+    if (t.userId === userId) testCount++;
+  });
+
+  return sendMessage(
+    env,
+    chatId,
+    `🌺 Dear Student 🌺\n\n📊 Weekly Report\n\n📘 Study Time: ${formatTime(
+      totalMin
+    )}\n📝 Tests Taken: ${testCount}\n\n💡 Keep consistency 💪`
+  );
+}
+
+/* ------------------------------
+   MONTHLY REPORT
+--------------------------------*/
+function sendMonthlyReport(env, chatId, userId) {
+  let totalMin = 0;
+  Object.values(STUDY_LOG[userId] || {}).forEach(m => (totalMin += m));
+
+  return sendMessage(
+    env,
+    chatId,
+    `🌺 Dear Student 🌺\n\n📊 Monthly Report\n\n📘 Total Study: ${formatTime(
+      totalMin
+    )}\n\n🔥 You're preparing like a pro`
+  );
+}
+
+/* ------------------------------
+   ADMIN REPORT
+--------------------------------*/
+function sendAdminReport(env, chatId) {
+  return sendMessage(
+    env,
+    chatId,
+    `🌺 Admin Panel 🌺\n\n📚 Total MCQs: ${MCQ_DB.length}\n📝 Total Tests: ${TEST_HISTORY.length}`
+  );
+}
+
+/* ================== END PHASE-5 ================== */
