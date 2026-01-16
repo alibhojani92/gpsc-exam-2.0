@@ -51,7 +51,7 @@ export default {
     if (text === "/start") {
       await sendMessage({
         chat_id: chatId,
-        text: "🌺 Dear Student 🌺\n\nWelcome Dr Arzoo Fatema ❤️🌺",
+        text: "🌺 Dear Student 🌺\n\nWelcome To GPSC Exam Prepration ❤️🌺",
         reply_markup: {
           inline_keyboard: [
             [{ text: "📖 Start Reading", callback_data: "READ_START" }],
@@ -147,3 +147,72 @@ export default {
     return new Response("OK");
   },
 };
+// ===== PHASE 1 END =====
+/*********************** PHASE 2 START *************************
+ DAILY RESET + YESTERDAY SUMMARY + TARGET RESET (IST)
+***************************************************************/
+
+// ---- TIME HELPERS ----
+function getISTDate() {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+}
+function getDateKey(d = getISTDate()) {
+  return d.toISOString().slice(0, 10);
+}
+function formatHM(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// ---- DAILY CRON (every minute, safe) ----
+async function handleDailyAutomation(env) {
+  const now = getISTDate();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+
+  // Run ONLY at 12:00 AM IST
+  if (hour !== 0 || minute !== 0) return;
+
+  const today = getDateKey(now);
+  const yesterday = getDateKey(new Date(now.getTime() - 86400000));
+
+  // ---- Load KV data ----
+  const readLog = JSON.parse(await env.GPSC_KV.get("READ_LOG") || "{}");
+  const target = 480; // 08:00 hrs in minutes
+
+  const yesterdayMin = readLog[yesterday] || 0;
+
+  // ---- Send Yesterday Summary (GROUP ONLY) ----
+  const summary =
+`🌺 Dear Student 🌺
+
+📊 *Yesterday’s Study Summary*
+📅 Date: ${yesterday}
+
+📘 Studied: ${formatHM(yesterdayMin)}
+🎯 Target: 08:00
+📉 Shortfall: ${formatHM(Math.max(target - yesterdayMin, 0))}
+
+💡 Tip:
+Consistency beats intensity. Keep going 💪`;
+
+  await sendTelegramMessage(env, env.GROUP_ID, summary);
+
+  // ---- Reset today's counters ----
+  readLog[today] = 0;
+  await env.GPSC_KV.put("READ_LOG", JSON.stringify(readLog));
+
+  // Clear active reading sessions
+  await env.GPSC_KV.delete("ACTIVE_READ");
+
+  // Save last reset marker (debug safe)
+  await env.GPSC_KV.put("LAST_RESET", today);
+}
+
+// ---- Hook automation into fetch ----
+async function phase2AutomationHook(env) {
+  await handleDailyAutomation(env);
+}
+
+/*********************** PHASE 2 END ***************************/
