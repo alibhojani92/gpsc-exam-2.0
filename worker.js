@@ -1,99 +1,96 @@
-// ================================
-// GPSC Exam 2.0 – PHASE 1
-// CORE STABLE BOT (Webhook + Start + Help)
-// ================================
+/*************************************************
+ * PART 1 – CORE & SAFETY LAYER
+ * Project: GPSC Exam 2.0
+ * Status: PHASE-1
+ *************************************************/
 
-export default {
-  async fetch(request, env) {
-    if (request.method !== "POST") {
-      return new Response("OK", { status: 200 });
-    }
+/* ========== BASIC CONSTANTS ========== */
 
-    const update = await request.json();
+const BOT_NAME = "🌺 Dear Student 🌺";
+const ADMIN_ID = 7539477188;
+const GROUP_ID = -5154292869;
 
-    // Telegram message OR callback
-    const message =
-      update.message ||
-      update.edited_message ||
-      update.callback_query?.message;
-
-    if (!message || !message.chat) {
-      return new Response("OK", { status: 200 });
-    }
-
-    const chatId = message.chat.id;
-    const text = update.message?.text || "";
-
-    // ===== COMMON HEADER =====
-    const HEADER = "🌺 Only Dear Student 🌺\n\n";
-
-    // ===== SEND MESSAGE FUNCTION =====
-    async function send(text, keyboard = null) {
-      const body = {
-        chat_id: chatId,
-        text: HEADER + text,
-        parse_mode: "HTML",
-      };
-
-      if (keyboard) {
-        body.reply_markup = keyboard;
-      }
-
-      await fetch(
-        `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
-    }
-
-    // ===== /start COMMAND =====
-    if (text === "/start") {
-      await send(
-        "👋 Welcome!\n\n" +
-          "This is <b>GPSC Exam 2.0</b>.\n\n" +
-          "Use the buttons below 👇",
-        {
-          inline_keyboard: [
-            [{ text: "📖 Help / Commands", callback_data: "HELP" }],
-          ],
-        }
-      );
-      return new Response("OK", { status: 200 });
-    }
-
-    // ===== /help COMMAND =====
-    if (text === "/help") {
-      await send(
-        "📘 <b>Available Commands</b>\n\n" +
-          "▶️ /start – Start bot\n" +
-          "▶️ /help – Command list\n\n" +
-          "More features will unlock step by step 🚀"
-      );
-      return new Response("OK", { status: 200 });
-    }
-
-    // ===== INLINE HELP BUTTON =====
-    if (update.callback_query?.data === "HELP") {
-      await send(
-        "📘 <b>Command List</b>\n\n" +
-          "▶️ /start – Start bot\n" +
-          "▶️ /help – Command list\n\n" +
-          "MCQs, Tests, Reports coming soon 💡"
-      );
-      return new Response("OK", { status: 200 });
-    }
-
-    // ===== SAFE DEFAULT (NO SPAM) =====
-    if (text.startsWith("/")) {
-      await send(
-        "❌ Unknown command.\n\n" +
-          "Type /help to see available options."
-      );
-    }
-
-    return new Response("OK", { status: 200 });
-  },
+/* Emojis – global use */
+const EMOJI = {
+  ok: "✅",
+  error: "⚠️",
+  read: "📖",
+  stop: "⏹️",
+  test: "📝",
+  report: "📊",
+  fire: "🔥",
+  clock: "⏱️",
+  brain: "🧠",
+  book: "📚",
+  bell: "🔔",
+  moon: "🌙",
+  sun: "🌅",
 };
+
+/* ========== SAFE JSON PARSER ========== */
+function safeJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/* ========== MESSAGE TYPE HELPERS ========== */
+function isPrivate(chat) {
+  return chat?.type === "private";
+}
+function isGroup(chat) {
+  return chat?.type === "group" || chat?.type === "supergroup";
+}
+function isAdmin(userId) {
+  return userId === ADMIN_ID;
+}
+
+/* ========== TELEGRAM API HELPERS ========== */
+async function tgSend(env, chatId, text, extra = {}) {
+  const payload = {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    ...extra,
+  };
+
+  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+/* ========== INTRO MESSAGE ========== */
+async function sendWelcome(env, chatId) {
+  await tgSend(
+    env,
+    chatId,
+    `${BOT_NAME}\n\n${EMOJI.ok} Bot is online & ready`
+  );
+}
+
+/* ========== COMMAND NORMALIZER ========== */
+function normalize(text = "") {
+  return text.trim().toLowerCase();
+}
+
+/* ========== SAFE EMPTY RESPONSE ========== */
+async function safeReply(env, chatId) {
+  await tgSend(
+    env,
+    chatId,
+    `${BOT_NAME}\n${EMOJI.error} Command not available yet`
+  );
+}
+
+/* ========== PART-1 TEST MARKER ========== */
+/*
+TEST CHECKS FOR PART-1:
+1️⃣ Bot replies /start in private
+2️⃣ Bot replies /start in group
+3️⃣ No crash on random message
+4️⃣ Emoji + intro visible
+*/
