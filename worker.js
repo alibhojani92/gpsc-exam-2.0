@@ -1,46 +1,39 @@
-/********************************************************
- * GPSC EXAM 2.0 BOT
- * PART 1 – CORE FOUNDATION
- * (Webhook, Routing, Intro, Safety)
- *
- * 🔒 LOCK RULE:
- * - This file is FULL replacement
- * - Paste ONCE
- * - After PASS → NEVER EDIT
- ********************************************************/
+/************************************************************
+ * GPSC DENTAL EXAM BOT 2.0
+ * PHASE 1 — CORE FOUNDATION (FINAL FIX)
+ * Features:
+ * - Reading start/stop with accurate timing
+ * - Daily auto reset
+ * - Remaining target calculation
+ * - Today / Yesterday stats
+ * - Inline keyboard only
+ * - Double-click protection
+ * - No spam / safe fallback
+ ************************************************************/
 
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("Bot is running ✅", { status: 200 });
+      return new Response("Bot running ✅", { status: 200 });
     }
 
-    let update;
-    try {
-      update = await request.json();
-    } catch (e) {
-      return new Response("Invalid JSON", { status: 200 });
-    }
-
+    const update = await request.json();
     if (!update.message && !update.callback_query) {
-      return new Response("No usable update", { status: 200 });
+      return new Response("OK", { status: 200 });
     }
-
-    const message = update.message || update.callback_query.message;
-    const chatId = message.chat.id;
-    const userId = message.from.id;
-    const text =
-      update.message?.text ||
-      update.callback_query?.data ||
-      "";
 
     const BOT_TOKEN = env.BOT_TOKEN;
-    const ADMIN_ID = Number(env.ADMIN_ID || 0);
+    const chat =
+      update.message?.chat || update.callback_query?.message.chat;
+    const chatId = chat.id;
+    const userId =
+      update.message?.from.id ||
+      update.callback_query?.from.id;
 
-    const isAdmin = userId === ADMIN_ID;
+    const text = update.message?.text || "";
+    const callbackData = update.callback_query?.data || "";
 
-    /* ---------------- TELEGRAM SEND ---------------- */
-
+    /* -------------------- TELEGRAM SEND -------------------- */
     async function sendMessage(text, replyMarkup = null) {
       const payload = {
         chat_id: chatId,
@@ -49,11 +42,14 @@ export default {
       };
       if (replyMarkup) payload.reply_markup = replyMarkup;
 
-      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      await fetch(
+        `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
     }
 
     async function answerCallback() {
@@ -70,91 +66,186 @@ export default {
       );
     }
 
-    /* ---------------- INLINE KEYBOARD ---------------- */
+    /* -------------------- DATE HELPERS -------------------- */
+    function todayKey() {
+      return new Date().toISOString().slice(0, 10);
+    }
 
-    const mainKeyboard = {
+    function msToHHMM(ms) {
+      const totalMin = Math.floor(ms / 60000);
+      const h = Math.floor(totalMin / 60)
+        .toString()
+        .padStart(2, "0");
+      const m = (totalMin % 60).toString().padStart(2, "0");
+      return `${h}:${m}`;
+    }
+
+    const TARGET_MS = 8 * 60 * 60 * 1000;
+
+    /* -------------------- LOAD USER DATA -------------------- */
+    const userKey = `user:${userId}`;
+    let user =
+      (await env.KV.get(userKey, "json")) || {
+        date: todayKey(),
+        totalMs: 0,
+        yesterdayMs: 0,
+        reading: false,
+        startAt: null,
+      };
+
+    /* -------------------- DAILY RESET -------------------- */
+    const today = todayKey();
+    if (user.date !== today) {
+      user.yesterdayMs = user.totalMs;
+      user.totalMs = 0;
+      user.reading = false;
+      user.startAt = null;
+      user.date = today;
+    }
+
+    /* -------------------- INLINE KEYBOARD -------------------- */
+    const keyboard = {
       inline_keyboard: [
         [
-          { text: "▶️ Start Reading", callback_data: "START_READING" },
-          { text: "⏹ Stop Reading", callback_data: "STOP_READING" },
+          { text: "▶️ Start Reading", callback_data: "START" },
+          { text: "⏹ Stop Reading", callback_data: "STOP" },
         ],
         [
-          { text: "📊 Today Status", callback_data: "TODAY_STATUS" },
+          { text: "📊 Today Status", callback_data: "STATUS" },
           { text: "❓ Help", callback_data: "HELP" },
         ],
       ],
     };
 
-    /* ---------------- COMMAND ROUTER ---------------- */
+    /* -------------------- COMMAND / CALLBACK HANDLER -------------------- */
 
-    // Mandatory position (DO NOT MOVE)
-    if (await handleReading(update, env, sendMessage, answerCallback)) {
-      return new Response("OK");
-    }
+    const action = callbackData || text;
 
-    // START / HELP
-    if (text === "/start" || text === "HELP") {
+    // START
+    if (action === "/start" || action === "START") {
+      await answerCallback();
+
       await sendMessage(
-        `🌺 <b>Dear Student</b> 🌺\n\n` +
-          `📚 <b>Welcome to GPSC Exam 2.0</b>\n\n` +
-          `🎯 <b>Daily Target:</b> 08:00 hours\n` +
-          `👇 Use buttons below`,
-        mainKeyboard
+        `🌸 <b>Dear Student</b> 🌸
+
+📚 Welcome to <b>GPSC Dental Exam 2.0</b>
+
+🎯 Daily Target: <b>08:00 hours</b>
+👇 Use buttons below`,
+        keyboard
       );
+
+      await env.KV.put(userKey, JSON.stringify(user));
       return new Response("OK");
     }
 
+    // START READING
+    if (action === "START") {
+      await answerCallback();
+
+      if (user.reading) {
+        await sendMessage(
+          "⚠️ Reading already started.\nPlease stop first.",
+          keyboard
+        );
+        return new Response("OK");
+      }
+
+      user.reading = true;
+      user.startAt = Date.now();
+
+      await sendMessage(
+        `📖 <b>Reading started</b>
+
+🎯 Target: 08:00
+💪 Stay focused`,
+        keyboard
+      );
+
+      await env.KV.put(userKey, JSON.stringify(user));
+      return new Response("OK");
+    }
+
+    // STOP READING
+    if (action === "STOP") {
+      await answerCallback();
+
+      if (!user.reading) {
+        await sendMessage(
+          "⚠️ Reading not active.\nPress Start first.",
+          keyboard
+        );
+        return new Response("OK");
+      }
+
+      const sessionMs = Date.now() - user.startAt;
+      user.totalMs += sessionMs;
+      user.reading = false;
+      user.startAt = null;
+
+      await sendMessage(
+        `⏹ <b>Reading stopped</b>
+
+🕒 Session: ${msToHHMM(sessionMs)}
+📊 Today total: ${msToHHMM(user.totalMs)}
+
+😌 Take rest`,
+        keyboard
+      );
+
+      await env.KV.put(userKey, JSON.stringify(user));
+      return new Response("OK");
+    }
+
+    // STATUS
+    if (action === "STATUS") {
+      await answerCallback();
+
+      const remaining = Math.max(
+        TARGET_MS - user.totalMs,
+        0
+      );
+
+      await sendMessage(
+        `📊 <b>Today's Status</b>
+
+🕒 Studied: ${msToHHMM(user.totalMs)}
+⏳ Remaining: ${msToHHMM(remaining)}
+
+📅 Yesterday: ${msToHHMM(user.yesterdayMs)}`,
+        keyboard
+      );
+
+      return new Response("OK");
+    }
+
+    // HELP
+    if (action === "HELP") {
+      await answerCallback();
+
+      await sendMessage(
+        `❓ <b>Help</b>
+
+▶️ Start Reading — begin timer
+⏹ Stop Reading — stop & save time
+📊 Today Status — view progress
+
+⚠️ MCQ Safe Mode active`,
+        keyboard
+      );
+
+      return new Response("OK");
+    }
+
+    // UNKNOWN (NO SPAM)
+    if (text && text.startsWith("/")) {
+      await sendMessage(
+        "⚠️ Command not available yet.\nPlease use buttons.",
+        keyboard
+      );
+    }
+
+    await env.KV.put(userKey, JSON.stringify(user));
     return new Response("OK");
   },
 };
-
-/* ====================================================
- * PART-1 INTERNAL HANDLER
- * Reading (basic logic placeholder)
- * Other parts will extend this safely
- * ==================================================== */
-
-async function handleReading(update, env, sendMessage, answerCallback) {
-  if (!update.callback_query) return false;
-
-  const data = update.callback_query.data;
-
-  if (data === "START_READING") {
-    await answerCallback();
-    await sendMessage(
-      `📖 <b>Reading started</b>\n\n🎯 Target: 08:00\n💪 Stay focused`
-    );
-    return true;
-  }
-
-  if (data === "STOP_READING") {
-    await answerCallback();
-    await sendMessage(
-      `⏹ <b>Reading stopped</b>\n\n😌 Take rest`
-    );
-    return true;
-  }
-
-  if (data === "TODAY_STATUS") {
-    await answerCallback();
-    await sendMessage(
-      `📊 <b>Today's Status</b>\n\n⏱ Studied: 00:00\n🎯 Remaining: 08:00`
-    );
-    return true;
-  }
-
-  if (data === "HELP") {
-    await answerCallback();
-    await sendMessage(
-      `🌺 <b>Only Dear Student</b> 🌺\n\n` +
-        `📌 <b>Available Commands:</b>\n` +
-        `▶️ Start Reading\n` +
-        `⏹ Stop Reading\n` +
-        `📊 Today Status\n\n` +
-        `⚠️ MCQ safe mode active\n(No questions added yet)`
-    );
-    return true;
-  }
-
-  return false;
-}
