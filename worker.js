@@ -437,3 +437,87 @@ function revealAnswer(env, userAns) {
 }
 
 /* ================== END PHASE-3 ================== */
+/* ============================================================
+ * PHASE-4 : ADMIN MCQ BULK ADD + SUBJECT SYSTEM
+ * ============================================================
+ */
+
+let MCQ_ADD_MODE = false;
+
+/* ------------------------------
+   Extend message handler again
+--------------------------------*/
+const _phase4HandleMessage = handleMessage;
+handleMessage = async function (message, env) {
+  const chatId = message.chat.id;
+  const userId = message.from.id;
+  const text = message.text || "";
+
+  // ---------- ADMIN START ADD MCQ ----------
+  if (text.trim().toLowerCase() === "/addmcq") {
+    if (userId !== ADMIN_ID) return; // silent for students
+
+    MCQ_ADD_MODE = true;
+    return sendMessage(
+      env,
+      chatId,
+      `🌺 Dear Admin 🌺\n\n🧠 Send MCQs in bulk format now.\nUse SUBJECT line.\n\n⛔ Send anything else to cancel.`
+    );
+  }
+
+  // ---------- ADMIN MCQ INPUT ----------
+  if (MCQ_ADD_MODE && userId === ADMIN_ID) {
+    MCQ_ADD_MODE = false;
+    parseAndStoreMCQs(env, chatId, text);
+    return;
+  }
+
+  return _phase4HandleMessage(message, env);
+};
+
+/* ------------------------------
+   Parse MCQs
+--------------------------------*/
+function parseAndStoreMCQs(env, chatId, text) {
+  let subject = "General";
+  const subjectMatch = text.match(/subject\s*:\s*(.+)/i);
+  if (subjectMatch) subject = subjectMatch[1].trim();
+
+  const blocks = text
+    .replace(/subject\s*:.*\n?/i, "")
+    .split(/\n(?=q[\.\d])/i);
+
+  let added = 0;
+
+  blocks.forEach(block => {
+    const q = block.match(/q[\.\d]*\s*(.*)/i)?.[1];
+    const A = block.match(/A\)\s*(.*)/i)?.[1];
+    const B = block.match(/B\)\s*(.*)/i)?.[1];
+    const C = block.match(/C\)\s*(.*)/i)?.[1];
+    const D = block.match(/D\)\s*(.*)/i)?.[1];
+    const ans = block.match(/ans\s*[:\(]?\s*([ABCD])/i)?.[1];
+    const exp = block.match(/exp\s*:\s*(.*)/i)?.[1] || "";
+
+    if (q && A && B && C && D && ans) {
+      MCQ_DB.push({
+        q,
+        A,
+        B,
+        C,
+        D,
+        ans,
+        exp,
+        subject
+      });
+      added++;
+    }
+  });
+
+  sendMessage(
+    env,
+    chatId,
+    `🌺 Dear Admin 🌺\n\n✅ MCQs Added: ${added}\n📚 Subject: ${subject}`
+  );
+}
+
+/* ================== END PHASE-4 ================== */
