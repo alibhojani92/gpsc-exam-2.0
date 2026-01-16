@@ -115,198 +115,145 @@ export default {
 /**********************************************************
  * PHASE 1 END
  **********************************************************/
-/**********************************************************
- * PHASE 2 START
- * Feature: Daily Test Engine + Admin Detection
- **********************************************************/
+/***********************
+ PHASE 2 START
+ TEST ENGINE CORE (DT / WT)
+***********************/
 
-const ADMIN_ID = 7539477188;
-
-// ---- D1 HELPERS ----
-async function getRandomMCQs(env, limit = 20) {
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM mcqs ORDER BY RANDOM() LIMIT ?"
-  ).bind(limit).all();
-  return results;
+// helper: fetch random MCQs (no repeat logic will come later)
+async function getRandomMCQs(env, limit) {
+  const { results } = await env.DB
+    .prepare(`SELECT * FROM mcqs ORDER BY RANDOM() LIMIT ?`)
+    .bind(limit)
+    .all();
+  return results || [];
 }
 
-// ---- TEST SESSION (KV) ----
-async function startTest(env, chatId, questions) {
+// START DAILY TEST
+async function handleDailyTest(chatId, env) {
+  const mcqs = await getRandomMCQs(env, 20);
+
+  if (!mcqs.length) {
+    await sendMessage(env, chatId,
+      `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+
+⚠️ *Daily Test unavailable*
+
+📭 MCQs add nahi thayela che.
+🛠️ Admin ne MCQs add karva kaho.
+
+💡 Tip: Pehla MCQs add → pachi test`
+    );
+    return;
+  }
+
+  await sendMessage(env, chatId,
+    `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+
+📝 *Daily Test Started*
+📊 Questions: ${mcqs.length}
+⏱️ Time: 5 min per question
+
+✨ All the best!`
+  );
+
+  // store active test (simplified for Phase-2)
   await env.KV.put(
-    `test:${chatId}`,
-    JSON.stringify({
-      index: 0,
-      correct: 0,
-      wrong: 0,
-      questions,
-    })
+    `active_test_${chatId}`,
+    JSON.stringify({ type: "DT", index: 0, mcqs })
+  );
+
+  await sendQuestion(env, chatId);
+}
+
+// START WEEKLY TEST
+async function handleWeeklyTest(chatId, env) {
+  const mcqs = await getRandomMCQs(env, 50);
+
+  if (!mcqs.length) {
+    await sendMessage(env, chatId,
+      `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+
+⚠️ *Weekly Test unavailable*
+
+📭 MCQs add nahi thayela che.
+🛠️ Admin ne MCQs add karva kaho.`
+    );
+    return;
+  }
+
+  await sendMessage(env, chatId,
+    `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+
+📝 *Weekly Test Started*
+📊 Questions: ${mcqs.length}
+⏱️ Time: 5 min per question
+
+🔥 Stay focused!`
+  );
+
+  await env.KV.put(
+    `active_test_${chatId}`,
+    JSON.stringify({ type: "WT", index: 0, mcqs })
+  );
+
+  await sendQuestion(env, chatId);
+}
+
+// SEND QUESTION
+async function sendQuestion(env, chatId) {
+  const raw = await env.KV.get(`active_test_${chatId}`);
+  if (!raw) return;
+
+  const test = JSON.parse(raw);
+  const q = test.mcqs[test.index];
+
+  if (!q) {
+    await sendMessage(env, chatId,
+      `🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+
+✅ *Test Completed*
+🎉 Great effort!
+
+📊 Result & analysis next phase ma add thase.`
+    );
+    await env.KV.delete(`active_test_${chatId}`);
+    return;
+  }
+
+  await sendMessage(env, chatId,
+`🌺❤️ My Love Dr Arzoo Fatema ❤️🌺
+
+❓ *Q${test.index + 1}*
+${q.question}
+
+A️⃣ ${q.option_a}
+B️⃣ ${q.option_b}
+C️⃣ ${q.option_c}
+D️⃣ ${q.option_d}
+
+⏳ *5 minutes remaining*`
   );
 }
 
-async function getTest(env, chatId) {
-  const data = await env.KV.get(`test:${chatId}`);
-  return data ? JSON.parse(data) : null;
-}
+// ROUTER HOOK (called from main fetch)
+async function phase2Router(message, env) {
+  const text = message.text?.toLowerCase();
+  const chatId = message.chat.id;
 
-async function saveTest(env, chatId, test) {
-  await env.KV.put(`test:${chatId}`, JSON.stringify(test));
-}
-
-async function endTest(env, chatId) {
-  await env.KV.delete(`test:${chatId}`);
-}
-
-// ---- SEND QUESTION ----
-async function sendQuestion(env, chatId, test) {
-  const q = test.questions[test.index];
-
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "A", callback_data: "A" }, { text: "B", callback_data: "B" }],
-      [{ text: "C", callback_data: "C" }, { text: "D", callback_data: "D" }],
-    ],
-  };
-
-  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text:
-`🌺 Dr Arzoo Fatema 🌺
-📝 Q${test.index + 1} / ${test.questions.length}
-
-${q.question}
-
-A) ${q.opt_a}
-B) ${q.opt_b}
-C) ${q.opt_c}
-D) ${q.opt_d}`,
-      reply_markup: keyboard,
-    }),
-  });
-}
-
-/**********************************************************
- * PHASE 2 HANDLER EXTENSION
- **********************************************************/
-
-addEventListener("fetch", event => {
-  event.respondWith(handlePhase2(event.request, event.env));
-});
-
-async function handlePhase2(request, env) {
-  if (request.method !== "POST") return new Response("OK");
-
-  const update = await request.json();
-
-  // ---- /dt COMMAND ----
-  if (update.message?.text === "/dt") {
-    const chatId = update.message.chat.id;
-
-    const mcqs = await getRandomMCQs(env, 20);
-    if (mcqs.length < 20) {
-      await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text:
-`🌺 Dr Arzoo Fatema 🌺
-⚠️ Not enough MCQs available
-Please contact admin`,
-        }),
-      });
-      return new Response("OK");
-    }
-
-    await startTest(env, chatId, mcqs);
-
-    await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text:
-`🌺 Dr Arzoo Fatema 🌺
-📝 Daily Test Started
-
-📊 Total Questions: 20`,
-      }),
-    });
-
-    const test = await getTest(env, chatId);
-    await sendQuestion(env, chatId, test);
-    return new Response("OK");
+  if (text === "/dt") {
+    await handleDailyTest(chatId, env);
+    return true;
   }
 
-  // ---- ANSWER HANDLER ----
-  if (update.callback_query) {
-    const chatId = update.callback_query.message.chat.id;
-    const answer = update.callback_query.data;
-
-    const test = await getTest(env, chatId);
-    if (!test) return new Response("OK");
-
-    const q = test.questions[test.index];
-    let reply = "";
-
-    if (answer === q.correct) {
-      test.correct++;
-      reply = "✅ Correct Answer 🎉";
-    } else {
-      test.wrong++;
-      reply = `❌ Wrong Answer\n\n✅ Correct: ${q.correct}`;
-    }
-
-    await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text:
-`${reply}
-
-💡 Explanation:
-${q.explanation}`,
-      }),
-    });
-
-    test.index++;
-
-    if (test.index >= test.questions.length) {
-      await endTest(env, chatId);
-
-      const accuracy = Math.round(
-        (test.correct / (test.correct + test.wrong)) * 100
-      );
-
-      await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text:
-`🌺 Dr Arzoo Fatema 🌺
-📊 Test Finished
-
-✅ Correct: ${test.correct}
-❌ Wrong: ${test.wrong}
-🎯 Accuracy: ${accuracy}%
-
-💡 Tip:
-Revise weak subjects today`,
-        }),
-      });
-    } else {
-      await saveTest(env, chatId, test);
-      await sendQuestion(env, chatId, test);
-    }
+  if (text === "/wt") {
+    await handleWeeklyTest(chatId, env);
+    return true;
   }
 
-  return new Response("OK");
+  return false;
 }
 
-/**********************************************************
- * PHASE 2 END
- **********************************************************/
+/***********************
+ PHASE 2 END
+***********************/
