@@ -166,3 +166,124 @@ async function answerCallback(env, callbackId) {
     body: JSON.stringify({ callback_query_id: callbackId })
   });
 }
+/* ============================================================
+ * PHASE-2 : READING SYSTEM + TIME TRACKING
+ * ============================================================
+ * Features:
+ * - /read & /stop commands
+ * - Inline button start/stop
+ * - Daily target: 8 hours
+ * - Time count in HH:MM
+ * - Safe double-click handling
+ * ============================================================
+ */
+
+/* ------------------------------
+   In-memory store (Phase-2 only)
+   Later will move to KV/D1
+--------------------------------*/
+const readingSession = {};
+const readingLog = {};
+
+/* ------------------------------
+   Extend message handler
+--------------------------------*/
+const _oldHandleMessage = handleMessage;
+handleMessage = async function (message, env) {
+  const chatId = message.chat.id;
+  const userId = message.from.id;
+  const text = (message.text || "").trim().toLowerCase();
+
+  // -------- START READING --------
+  if (text === "/read") {
+    if (readingSession[userId]) {
+      return sendMessage(
+        env,
+        chatId,
+        `🌺 Dear Student 🌺\n\n⚠️ Reading already running.`
+      );
+    }
+
+    readingSession[userId] = Date.now();
+
+    return sendMessage(
+      env,
+      chatId,
+      `🌺 Dear Student 🌺\n\n📖 Reading started\n🎯 Daily Target: 08:00 hrs`,
+      {
+        inline_keyboard: [
+          [{ text: "🛑 Stop Reading", callback_data: "stop_read" }]
+        ]
+      }
+    );
+  }
+
+  // -------- STOP READING --------
+  if (text === "/stop") {
+    if (!readingSession[userId]) {
+      return sendMessage(
+        env,
+        chatId,
+        `🌺 Dear Student 🌺\n\n⚠️ Reading not started yet.`
+      );
+    }
+
+    const start = readingSession[userId];
+    const minutes = Math.floor((Date.now() - start) / 60000);
+    delete readingSession[userId];
+
+    const today = new Date().toISOString().slice(0, 10);
+    readingLog[today] = (readingLog[today] || 0) + minutes;
+
+    const studied = formatTime(readingLog[today]);
+    const remaining = formatTime(Math.max(480 - readingLog[today], 0));
+
+    return sendMessage(
+      env,
+      chatId,
+      `🌺 Dear Student 🌺\n\n⏱️ Reading stopped\n\n📘 Studied Today: ${studied}\n🎯 Remaining Target: ${remaining}`
+    );
+  }
+
+  // fallback to PHASE-1 handler
+  return _oldHandleMessage(message, env);
+};
+
+/* ------------------------------
+   Extend callback handler
+--------------------------------*/
+const _oldHandleCallback = handleCallback;
+handleCallback = async function (callback, env) {
+  const chatId = callback.message.chat.id;
+  const userId = callback.from.id;
+  const data = callback.data;
+
+  await answerCallback(env, callback.id);
+
+  if (data === "read") {
+    return handleMessage(
+      { chat: { id: chatId }, from: { id: userId }, text: "/read" },
+      env
+    );
+  }
+
+  if (data === "stop_read") {
+    return handleMessage(
+      { chat: { id: chatId }, from: { id: userId }, text: "/stop" },
+      env
+    );
+  }
+
+  return _oldHandleCallback(callback, env);
+};
+
+/* ------------------------------
+   Time formatter helper
+--------------------------------*/
+function formatTime(mins) {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/* ================== END PHASE-2 ================== */
