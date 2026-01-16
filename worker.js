@@ -1,169 +1,78 @@
-/**
- * =========================================
- * GPSC Exam 2.0 – PHASE 1 (READING SYSTEM)
- * FIXED: Inline keyboard callback response
- * =========================================
- */
+/************************************************************
+ * GPSC EXAM 2.0 BOT
+ * PART 1 — CORE FOUNDATION
+ * (Webhook, Routing, Intro, Safety)
+ ************************************************************/
 
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("OK");
+      return new Response("Bot is running ✅", { status: 200 });
     }
 
     const update = await request.json();
-    const message = update.message || update.callback_query?.message;
-    const chatId = message?.chat?.id;
-    const userId = message?.from?.id;
 
-    if (!chatId || !userId) {
-      return new Response("No chat");
+    if (!update.message) {
+      return new Response("No message", { status: 200 });
     }
 
-    /* 🔹 MANDATORY: ACKNOWLEDGE CALLBACK 🔹 */
-    if (update.callback_query) {
-      await fetch(
-        `https://api.telegram.org/bot${env.BOT_TOKEN}/answerCallbackQuery`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            callback_query_id: update.callback_query.id,
-          }),
-        }
-      );
-    }
+    const message = update.message;
+    const chatId = message.chat.id;
+    const userId = message.from.id;
+    const text = message.text || "";
 
-    // ---------- CONSTANTS ----------
-    const TARGET_MINUTES = 480; // 08:00 hours
-    const today = new Date().toISOString().slice(0, 10);
+    const BOT_TOKEN = env.BOT_TOKEN;
+    const ADMIN_ID = Number(env.ADMIN_ID);
+    const GROUP_ID = Number(env.GROUP_ID);
 
-    const startKey = `reading_start:${userId}`;
-    const totalKey = `reading_total:${userId}:${today}`;
+    const isAdmin = userId === ADMIN_ID;
+    const isGroup = chatId === GROUP_ID;
 
-    // ---------- HELPERS ----------
-    const sendMessage = async (text, keyboard = null) => {
+    // ---------- TELEGRAM SEND ----------
+    async function sendMessage(text, replyMarkup = null) {
       const payload = {
         chat_id: chatId,
         text,
         parse_mode: "HTML",
       };
-      if (keyboard) payload.reply_markup = keyboard;
+      if (replyMarkup) payload.reply_markup = replyMarkup;
 
-      await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-    };
+    }
 
-    const formatTime = (mins) => {
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    };
+    // ---------- INTRO TEXT (LOCKED) ----------
+    const INTRO = "🌺 Dear Student 🌺";
 
-    const keyboard = {
-      inline_keyboard: [
-        [
-          { text: "▶️ Start Reading", callback_data: "START_READ" },
-          { text: "⏹️ Stop Reading", callback_data: "STOP_READ" },
-        ],
-        [
-          { text: "📊 Today Status", callback_data: "STATUS" },
-          { text: "❓ Help", callback_data: "HELP" },
-        ],
-      ],
-    };
+    // ---------- /start ----------
+    if (text === "/start") {
+      if (isAdmin) {
+        await sendMessage(
+          `${INTRO}\n\n🛠 <b>Admin Panel</b>\n\nYou are logged in as admin.`,
+        );
+      } else {
+        await sendMessage(
+          `${INTRO}\n\n📘 Welcome to GPSC Dental Exam Bot\n\nUse commands or buttons to continue.`,
+        );
+      }
+      return new Response("OK");
+    }
 
-    // ---------- /START ----------
-    if (update.message?.text === "/start") {
+    // ---------- /help (placeholder) ----------
+    if (text === "/help") {
       await sendMessage(
-        "🌺 <b>Dear Student</b> 🌺\n\n" +
-          "📚 Welcome to GPSC Exam 2.0\n\n" +
-          "🎯 Daily Target: <b>08:00 hours</b>\n" +
-          "👇 Use buttons below",
-        keyboard
+        `${INTRO}\n\nℹ️ <b>Help</b>\n\nCommands will be enabled step-by-step.`,
       );
       return new Response("OK");
     }
 
-    const data = update.callback_query?.data;
-    if (!data) return new Response("OK");
-
-    // ---------- START READING ----------
-    if (data === "START_READ") {
-      const running = await env.KV_READING.get(startKey);
-      if (running) {
-        await sendMessage("⚠️ <b>Reading already running</b>", keyboard);
-        return new Response("OK");
-      }
-
-      await env.KV_READING.put(startKey, Date.now().toString());
-
-      const total = parseInt((await env.KV_READING.get(totalKey)) || "0");
-      const remaining = Math.max(TARGET_MINUTES - total, 0);
-
-      await sendMessage(
-        "▶️ <b>Reading Started</b>\n\n" +
-          `🎯 Target: 08:00\n` +
-          `⏳ Remaining: <b>${formatTime(remaining)}</b>\n\n` +
-          "💪 Stay focused!",
-        keyboard
-      );
-    }
-
-    // ---------- STOP READING ----------
-    if (data === "STOP_READ") {
-      const start = await env.KV_READING.get(startKey);
-      if (!start) {
-        await sendMessage("⚠️ <b>No active session</b>", keyboard);
-        return new Response("OK");
-      }
-
-      const duration = Math.floor((Date.now() - Number(start)) / 60000);
-      await env.KV_READING.delete(startKey);
-
-      const prev = parseInt((await env.KV_READING.get(totalKey)) || "0");
-      const total = prev + duration;
-      await env.KV_READING.put(totalKey, total.toString());
-
-      const remaining = Math.max(TARGET_MINUTES - total, 0);
-
-      await sendMessage(
-        "⏹️ <b>Reading Stopped</b>\n\n" +
-          `📘 Session: <b>${formatTime(duration)}</b>\n` +
-          `📊 Today: <b>${formatTime(total)}</b>\n` +
-          `⏳ Remaining: <b>${formatTime(remaining)}</b>`,
-        keyboard
-      );
-    }
-
-    // ---------- STATUS ----------
-    if (data === "STATUS") {
-      const total = parseInt((await env.KV_READING.get(totalKey)) || "0");
-      const remaining = Math.max(TARGET_MINUTES - total, 0);
-
-      await sendMessage(
-        "📊 <b>Today's Status</b>\n\n" +
-          `📘 Studied: <b>${formatTime(total)}</b>\n` +
-          `🎯 Target: 08:00\n` +
-          `⏳ Remaining: <b>${formatTime(remaining)}</b>`,
-        keyboard
-      );
-    }
-
-    // ---------- HELP ----------
-    if (data === "HELP") {
-      await sendMessage(
-        "❓ <b>Help</b>\n\n" +
-          "▶️ Start Reading\n" +
-          "⏹️ Stop Reading\n" +
-          "📊 Today Status\n\n" +
-          "🎯 Target: 08 hours/day",
-        keyboard
-      );
-    }
+    // ---------- FALLBACK ----------
+    await sendMessage(
+      `${INTRO}\n\n⚠️ Command not available yet.\n\nPlease wait for next update.`,
+    );
 
     return new Response("OK");
   },
