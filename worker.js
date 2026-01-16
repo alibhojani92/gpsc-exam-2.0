@@ -1,70 +1,86 @@
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     if (request.method !== "POST") {
-      return new Response("OK", { status: 200 });
+      return new Response("OK");
     }
 
     let update;
     try {
       update = await request.json();
-    } catch (e) {
-      return new Response("Invalid JSON", { status: 200 });
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
     }
 
     const BOT_TOKEN = env.BOT_TOKEN;
-    const API_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
+    const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-    // FIXED NAME (HARD CODED – NEVER CHANGE)
-    const BOT_NAME = "🌺❤️ My Love Dr Arzoo Fatema ❤️🌺";
+    // ---------- Helpers ----------
+    async function sendMessage(chatId, text, replyMarkup = null) {
+      const payload = {
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+      };
+      if (replyMarkup) payload.reply_markup = replyMarkup;
 
-    // Get message (private or group)
-    const message =
-      update.message ||
-      update.edited_message ||
-      update.channel_post ||
-      update.edited_channel_post;
-
-    if (!message || !message.chat) {
-      return new Response("No message", { status: 200 });
-    }
-
-    const chatId = message.chat.id;
-    const text = (message.text || "").trim();
-
-    let replyText = "";
-
-    // START COMMAND
-    if (text === "/start") {
-      replyText =
-        `${BOT_NAME}\n\n` +
-        `👋 Welcome!\n` +
-        `📚 This is GPSC Exam 2.0 Bot\n\n` +
-        `Type anything to check bot is alive ✅`;
-    }
-    // ANY OTHER MESSAGE
-    else if (text.length > 0) {
-      replyText =
-        `${BOT_NAME}\n\n` +
-        `✅ Bot is working\n` +
-        `📝 You said: ${text}`;
-    } else {
-      return new Response("No text", { status: 200 });
-    }
-
-    // SEND MESSAGE
-    try {
-      await fetch(`${API_URL}/sendMessage`, {
+      await fetch(`${API}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: replyText,
-        }),
+        body: JSON.stringify(payload),
       });
-    } catch (e) {
-      return new Response("Send failed", { status: 200 });
     }
 
-    return new Response("OK", { status: 200 });
+    // ---------- Extract message ----------
+    const msg =
+      update.message ||
+      update.edited_message ||
+      update.callback_query?.message;
+
+    if (!msg || !msg.text) {
+      return new Response("No message");
+    }
+
+    const text = msg.text.trim();
+    const chatId = msg.chat.id;
+
+    // ---------- INTRO TEXT ----------
+    const INTRO = "🌺❤️ My Love Dr Arzoo Fatema ❤️🌺";
+
+    // ---------- COMMAND HANDLER ----------
+    if (!text.startsWith("/")) {
+      // ❌ Ignore all normal messages (NO SPAM)
+      return new Response("Ignored");
+    }
+
+    // Normalize command (remove bot username)
+    const command = text.split(" ")[0].split("@")[0];
+
+    switch (command) {
+      case "/start":
+        await sendMessage(
+          chatId,
+          `${INTRO}\n\n✨ Welcome\n\nUse commands to continue.\n/help`
+        );
+        break;
+
+      case "/help":
+        await sendMessage(
+          chatId,
+          `${INTRO}\n\n📌 Available Commands:\n\n` +
+            `• /start – Start bot\n` +
+            `• /help – Help menu\n\n` +
+            `More features coming next phases 🚀`
+        );
+        break;
+
+      default:
+        await sendMessage(
+          chatId,
+          `${INTRO}\n\n❌ Unknown command\nUse /help`
+        );
+        break;
+    }
+
+    return new Response("OK");
   },
 };
