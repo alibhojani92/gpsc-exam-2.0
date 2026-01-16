@@ -1,86 +1,95 @@
+/**********************************************************
+ PHASE 1 – CORE SETUP
+ GPSC EXAM 2.0 BOT
+**********************************************************/
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method !== "POST") {
-      return new Response("OK");
+      return new Response("Bot running ✅", { status: 200 });
     }
 
     let update;
     try {
       update = await request.json();
-    } catch {
+    } catch (e) {
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    const BOT_TOKEN = env.BOT_TOKEN;
-    const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+    // Telegram message OR callback
+    const message = update.message || update.callback_query?.message;
+    if (!message) {
+      return new Response("No message", { status: 200 });
+    }
 
-    // ---------- Helpers ----------
-    async function sendMessage(chatId, text, replyMarkup = null) {
+    const chatId = message.chat.id;
+    const userId = message.from.id;
+    const text = update.message?.text || "";
+
+    const ADMIN_ID = Number(env.ADMIN_ID);
+    const GROUP_ID = Number(env.GROUP_ID);
+    const BOT_TOKEN = env.BOT_TOKEN;
+
+    // Intro text (LOCKED)
+    const INTRO = "🌺❤️ My Love Dr Arzoo Fatema ❤️🌺";
+
+    // Helper to send message
+    async function sendMessage(text, replyMarkup = null) {
       const payload = {
         chat_id: chatId,
         text,
-        parse_mode: "HTML",
+        parse_mode: "HTML"
       };
       if (replyMarkup) payload.reply_markup = replyMarkup;
 
-      await fetch(`${API}/sendMessage`, {
+      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload)
       });
     }
 
-    // ---------- Extract message ----------
-    const msg =
-      update.message ||
-      update.edited_message ||
-      update.callback_query?.message;
-
-    if (!msg || !msg.text) {
-      return new Response("No message");
+    // ===== /start command =====
+    if (text === "/start") {
+      // Admin menu
+      if (userId === ADMIN_ID) {
+        await sendMessage(
+          `${INTRO}\n\n🛠 <b>Admin Panel</b>\n\nChoose an option 👇`,
+          {
+            inline_keyboard: [
+              [{ text: "➕ Add MCQ", callback_data: "admin_add_mcq" }],
+              [{ text: "📊 MCQ Count", callback_data: "admin_mcq_count" }],
+              [{ text: "📑 Student Reports", callback_data: "admin_reports" }]
+            ]
+          }
+        );
+      } else {
+        // Student menu
+        await sendMessage(
+          `${INTRO}\n\n📚 Welcome\nChoose an option 👇`,
+          {
+            inline_keyboard: [
+              [{ text: "📖 Start Reading", callback_data: "read_start" }],
+              [{ text: "⏹ Stop Reading", callback_data: "read_stop" }],
+              [{ text: "📝 Daily Test", callback_data: "test_daily" }],
+              [{ text: "📊 My Report", callback_data: "my_report" }]
+            ]
+          }
+        );
+      }
+      return new Response("OK", { status: 200 });
     }
 
-    const text = msg.text.trim();
-    const chatId = msg.chat.id;
+    // ===== Temporary fallback reply (Phase 1 safety) =====
+    // Any other message -> basic acknowledgment
+    await sendMessage(
+      `${INTRO}\n\n✅ Bot is active.\n\nNext features coming soon 🚀`
+    );
 
-    // ---------- INTRO TEXT ----------
-    const INTRO = "🌺❤️ My Love Dr Arzoo Fatema ❤️🌺";
-
-    // ---------- COMMAND HANDLER ----------
-    if (!text.startsWith("/")) {
-      // ❌ Ignore all normal messages (NO SPAM)
-      return new Response("Ignored");
-    }
-
-    // Normalize command (remove bot username)
-    const command = text.split(" ")[0].split("@")[0];
-
-    switch (command) {
-      case "/start":
-        await sendMessage(
-          chatId,
-          `${INTRO}\n\n✨ Welcome\n\nUse commands to continue.\n/help`
-        );
-        break;
-
-      case "/help":
-        await sendMessage(
-          chatId,
-          `${INTRO}\n\n📌 Available Commands:\n\n` +
-            `• /start – Start bot\n` +
-            `• /help – Help menu\n\n` +
-            `More features coming next phases 🚀`
-        );
-        break;
-
-      default:
-        await sendMessage(
-          chatId,
-          `${INTRO}\n\n❌ Unknown command\nUse /help`
-        );
-        break;
-    }
-
-    return new Response("OK");
-  },
+    return new Response("OK", { status: 200 });
+  }
 };
+
+/***********************
+ END PHASE 1
+***********************/
