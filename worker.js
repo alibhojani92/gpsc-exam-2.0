@@ -287,3 +287,153 @@ function formatTime(mins) {
 }
 
 /* ================== END PHASE-2 ================== */
+/* ============================================================
+ * PHASE-3 : MCQ TEST ENGINE (SAFE MODE)
+ * ============================================================
+ * Commands:
+ * /dt  -> Daily Test
+ * /wt  -> Weekly Test
+ * Inline MCQ (A B C D)
+ * Timer: 5 min + 2 min reminder
+ * ============================================================
+ */
+
+/* ------------------------------
+   Temporary MCQ store (safe)
+--------------------------------*/
+const MCQ_DB = []; // empty safe mode
+
+let ACTIVE_TEST = null;
+
+/* ------------------------------
+   Extend message handler
+--------------------------------*/
+const _phase3HandleMessage = handleMessage;
+handleMessage = async function (message, env) {
+  const chatId = message.chat.id;
+  const userId = message.from.id;
+  const text = (message.text || "").trim().toLowerCase();
+
+  // -------- DAILY TEST --------
+  if (text === "/dt" || text === "/wt") {
+    if (ACTIVE_TEST) {
+      return sendMessage(
+        env,
+        chatId,
+        `🌺 Dear Student 🌺\n\n⚠️ Test already running.`
+      );
+    }
+
+    if (MCQ_DB.length === 0) {
+      return sendMessage(
+        env,
+        chatId,
+        `🌺 Dear Student 🌺\n\n⚠️ MCQ database empty.\nPlease wait for admin to add questions.`
+      );
+    }
+
+    startTest(env, chatId, text === "/dt" ? "Daily" : "Weekly");
+    return;
+  }
+
+  return _phase3HandleMessage(message, env);
+};
+
+/* ------------------------------
+   Start Test
+--------------------------------*/
+function startTest(env, chatId, type) {
+  const shuffled = [...MCQ_DB].sort(() => Math.random() - 0.5);
+  const total = type === "Daily" ? 5 : 10;
+
+  ACTIVE_TEST = {
+    chatId,
+    type,
+    index: 0,
+    score: 0,
+    questions: shuffled.slice(0, total)
+  };
+
+  askQuestion(env);
+}
+
+/* ------------------------------
+   Ask Question
+--------------------------------*/
+function askQuestion(env) {
+  if (!ACTIVE_TEST) return;
+
+  if (ACTIVE_TEST.index >= ACTIVE_TEST.questions.length) {
+    sendMessage(
+      env,
+      ACTIVE_TEST.chatId,
+      `🌺 Dear Student 🌺\n\n📊 ${ACTIVE_TEST.type} Test Finished\n\n✅ Score: ${ACTIVE_TEST.score}/${ACTIVE_TEST.questions.length}`
+    );
+    ACTIVE_TEST = null;
+    return;
+  }
+
+  const q = ACTIVE_TEST.questions[ACTIVE_TEST.index];
+
+  sendMessage(
+    env,
+    ACTIVE_TEST.chatId,
+    `🌺 Dear Student 🌺\n\n📝 Q${ACTIVE_TEST.index + 1}\n${q.q}`,
+    {
+      inline_keyboard: [
+        [{ text: "A", callback_data: "A" }, { text: "B", callback_data: "B" }],
+        [{ text: "C", callback_data: "C" }, { text: "D", callback_data: "D" }]
+      ]
+    }
+  );
+
+  // 2 min reminder
+  setTimeout(() => {
+    if (ACTIVE_TEST)
+      sendMessage(env, ACTIVE_TEST.chatId, "⏳ 2 minutes remaining...");
+  }, 180000);
+
+  // auto timeout
+  setTimeout(() => {
+    if (ACTIVE_TEST) {
+      revealAnswer(env, null);
+    }
+  }, 300000);
+}
+
+/* ------------------------------
+   Handle MCQ answer
+--------------------------------*/
+const _phase3Callback = handleCallback;
+handleCallback = async function (cb, env) {
+  if (!ACTIVE_TEST) return _phase3Callback(cb, env);
+
+  const ans = cb.data;
+  revealAnswer(env, ans);
+  await answerCallback(env, cb.id);
+};
+
+/* ------------------------------
+   Reveal Answer
+--------------------------------*/
+function revealAnswer(env, userAns) {
+  const q = ACTIVE_TEST.questions[ACTIVE_TEST.index];
+
+  let text = `🌺 Dear Student 🌺\n\n`;
+
+  if (userAns && userAns === q.ans) {
+    ACTIVE_TEST.score++;
+    text += "✅ Correct Answer\n";
+  } else {
+    text += `❌ Wrong Answer\n✔️ Correct: ${q.ans}\n`;
+  }
+
+  text += `\n💡 Explanation:\n${q.exp || "—"}`;
+
+  sendMessage(env, ACTIVE_TEST.chatId, text);
+
+  ACTIVE_TEST.index++;
+  setTimeout(() => askQuestion(env), 2000);
+}
+
+/* ================== END PHASE-3 ================== */
