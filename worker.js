@@ -1,5 +1,16 @@
-if (new URL(request.url).pathname === "/kv-test") {
-  await env.KV.put("health", "OK");
-  const v = await env.KV.get("health");
-  return new Response("KV STATUS: " + v);
-}
+export default {
+  async fetch(request, env, ctx) {
+    // Write test key if not exists
+    let v = await env.KV.get("health");
+
+    if (!v) {
+      await env.KV.put("health", "KV_OK");
+      v = "KV_OK (written now)";
+    }
+
+    return new Response(
+      "KV STATUS: " + v,
+      { headers: { "content-type": "text/plain" } }
+    );
+  }
+};
