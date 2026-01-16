@@ -1,0 +1,11 @@
+name = "gpsc-v2"
+main = "worker.js"
+compatibility_date = "2026-01-15"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gpsc_v2_db"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "GPSC_V21_DB"
