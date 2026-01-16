@@ -1118,3 +1118,111 @@ async function sendWeakSubjectReminder() {
 /*************************************************
  * ========== PHASE 9 END ==========
  *************************************************/
+  /*************************************************
+ * ========== PHASE 10 START ==========
+ * MCQ BULK ADD • SUBJECT MASTER • DENTAL PULSE 18
+ *************************************************/
+
+/* ========= SUBJECT MASTER ========= */
+const SUBJECTS = [
+  "Oral Anatomy","Oral Physiology","Oral Histology",
+  "Dental Materials","Oral Pathology","Oral Microbiology",
+  "Oral Medicine","Oral Radiology","Periodontology",
+  "Prosthodontics","Conservative Dentistry","Endodontics",
+  "Orthodontics","Oral Surgery","Public Health Dentistry"
+];
+
+/* ========= ADMIN BULK MCQ ADD ========= */
+onCommand("addmcq", async (ctx) => {
+  if (ctx.userId !== ADMIN_ID) {
+    return ctx.reply("❌ Admin only command");
+  }
+
+  ctx.session.waitingForMCQ = true;
+  await ctx.reply(
+    "🛠 MCQ Bulk Add Mode\n\n" +
+    "Format:\n" +
+    "SUBJECT: Oral Pathology\n\n" +
+    "Q1. Question?\nA) ...\nB) ...\nC) ...\nD) ...\nAns: B\nExp: Explanation"
+  );
+});
+
+/* ========= HANDLE MCQ TEXT ========= */
+onMessage(async (ctx) => {
+  if (!ctx.session.waitingForMCQ) return;
+
+  ctx.session.waitingForMCQ = false;
+  const text = ctx.text;
+
+  const subjectMatch = text.match(/SUBJECT:\s*(.+)/i);
+  if (!subjectMatch) {
+    return ctx.reply("❌ Subject missing");
+  }
+
+  const subject = subjectMatch[1].trim();
+  if (!SUBJECTS.includes(subject)) {
+    return ctx.reply("❌ Invalid subject name");
+  }
+
+  const blocks = text.split(/\n(?=Q[\.\s]*\d+)/i);
+  let added = 0;
+
+  for (const block of blocks) {
+    const q = block.match(/Q[\.\s]*\d+\.\s*(.+)/i)?.[1];
+    const A = block.match(/A\)\s*(.+)/i)?.[1];
+    const B = block.match(/B\)\s*(.+)/i)?.[1];
+    const C = block.match(/C\)\s*(.+)/i)?.[1];
+    const D = block.match(/D\)\s*(.+)/i)?.[1];
+    const ans = block.match(/Ans:\s*([ABCD])/i)?.[1];
+    const exp = block.match(/Exp:\s*(.+)/i)?.[1] || "";
+
+    if (!q || !A || !B || !C || !D || !ans) continue;
+
+    await DB.addMCQ({
+      subject,
+      q, A, B, C, D,
+      ans, exp
+    });
+    added++;
+  }
+
+  await ctx.reply(
+    `✅ MCQ Added Successfully\n\n` +
+    `📚 Subject: ${subject}\n` +
+    `➕ Added: ${added}`
+  );
+});
+
+/* ========= MCQ COUNT ========= */
+onCommand("mcqcount", async (ctx) => {
+  if (ctx.userId !== ADMIN_ID) return;
+
+  let text = "📊 MCQ Database Status\n\n";
+  for (const s of SUBJECTS) {
+    const c = await DB.countMCQBySubject(s);
+    text += `• ${s}: ${c}\n`;
+  }
+  await ctx.reply(text);
+});
+
+/* ========= STUDENT SUBJECT REVISION ========= */
+onMessage(async (ctx) => {
+  if (!SUBJECTS.includes(ctx.text)) return;
+
+  const mcqs = await DB.getRandomMCQBySubject(ctx.text, 10);
+  if (!mcqs.length) {
+    return ctx.reply("⚠️ No MCQs available for this subject");
+  }
+
+  let out = `📘 Revision – ${ctx.text}\n\n`;
+  mcqs.forEach((m, i) => {
+    out += `${i+1}. ${m.q}\n` +
+           `✔️ ${m.ans}\n\n`;
+  });
+
+  await ctx.reply(out);
+});
+
+/*************************************************
+ * ========== PHASE 10 END ==========
+ *************************************************/
